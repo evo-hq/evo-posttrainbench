@@ -75,9 +75,15 @@ cp src/utils/system_monitor.sh "${JOB_DIR}/system_monitor.sh"
 cp src/utils/timestamp_lines.py "${JOB_DIR}/timestamp_lines.py"
 cp "agents/${AGENT}/solve.sh" "${JOB_DIR}/agent_solve.sh"
 
-# Copy agent-specific auth if present (e.g. for non-API agents)
+# Agent-specific auth: auth.json is bind-mounted at apptainer exec time so the
+# codex CLI can write the rotated refresh token back to the shared source file
+# (single-use refresh tokens otherwise burn after one job).
+AGENT_AUTH_SRC=""
 if [ -f "agents/${AGENT}/auth.json" ]; then
-    cp "agents/${AGENT}/auth.json" "${JOB_DIR}/.codex/auth.json"
+    AGENT_AUTH_SRC="$(cd "$(dirname "agents/${AGENT}/auth.json")" && pwd)/auth.json"
+    # Placeholder file inside the sandbox .codex dir for the bind mount to overlay.
+    mkdir -p "${JOB_DIR}/.codex"
+    : > "${JOB_DIR}/.codex/auth.json"
 fi
 if [ -f "agents/${AGENT}/oauth_token" ]; then
     cp "agents/${AGENT}/oauth_token" "${JOB_DIR}/oauth_token"
@@ -119,6 +125,8 @@ with_record_the_time() {
 SOLVE_OUT="${EVAL_DIR}/solve_out.txt"
 
 solve_task() {
+    AGENT_AUTH_BIND=()
+    [ -n "$AGENT_AUTH_SRC" ] && AGENT_AUTH_BIND=(--bind "${AGENT_AUTH_SRC}:/home/ben/.codex/auth.json")
     timeout --signal=TERM --kill-after=30s "$((NUM_HOURS * 60 + 5))m" \
     apptainer exec \
         --nv \
@@ -138,6 +146,7 @@ solve_task() {
         --env AGENT_CONFIG="${AGENT_CONFIG}" \
         --bind "${JOB_TMP}:/tmp" \
         --bind "${HF_MERGED}:${HF_HOME_NEW}" \
+        "${AGENT_AUTH_BIND[@]}" \
         --home "${JOB_DIR}:/home/ben" \
         --pwd "/home/ben/task" \
         --writable-tmpfs \
@@ -214,8 +223,10 @@ cp -r "containers/other_home_data/.codex" "${JOB_DIR}/"
 # ---- Judge 1: GPT-5.4 via codex CLI (subscription) ----
 echo "=== Judge 1: GPT-5.4 (codex CLI, subscription) ==="
 
-# Set up ChatGPT Pro subscription auth for codex judge
-cp "agents/codex_non_api/auth.json" "${JOB_DIR}/.codex/auth.json"
+# Bind-mount the shared auth.json into the container at exec time so rotated
+# refresh tokens persist back to the source instead of dying with the sandbox.
+JUDGE_CODEX_AUTH_SRC="$(pwd)/agents/codex_non_api/auth.json"
+: > "${JOB_DIR}/.codex/auth.json"
 if ! grep -q "forced_login_method" "${JOB_DIR}/.codex/config.toml" 2>/dev/null; then
     printf '\nforced_login_method = "chatgpt"\n' >> "${JOB_DIR}/.codex/config.toml"
 fi
@@ -231,6 +242,7 @@ with_huggingface_overlay apptainer exec \
     --env PYTHONNOUSERSITE="1" \
     --bind "${JOB_TMP}:/tmp" \
     --bind "${HF_MERGED}:${HF_HOME_NEW}" \
+    --bind "${JUDGE_CODEX_AUTH_SRC}:/home/ben/.codex/auth.json" \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \

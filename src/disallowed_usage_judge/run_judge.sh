@@ -134,15 +134,19 @@ if [ -f "$REPO_ROOT/src/eval/tasks/$BENCHMARK/test_data.json" ]; then
     cp "$REPO_ROOT/src/eval/tasks/$BENCHMARK/test_data.json" "$JOB_DIR/test_data.json"
 fi
 
-# Set up codex config + ChatGPT Pro subscription auth (only when GPT judge runs)
+# Set up codex config + ChatGPT Pro subscription auth (only when GPT judge runs).
+# auth.json itself is bind-mounted from the shared location at apptainer exec
+# time so codex can write the rotated refresh token back to the source and the
+# next job picks it up instead of reusing a stale single-use refresh token.
+CODEX_AUTH_SRC="$REPO_ROOT/agents/codex_non_api/auth.json"
 if [ "$RUN_GPT" = true ]; then
     cp -r "$REPO_ROOT/containers/other_home_data/.codex" "$JOB_DIR/"
-    if [ -f "$REPO_ROOT/agents/codex_non_api/auth.json" ]; then
-        cp "$REPO_ROOT/agents/codex_non_api/auth.json" "$JOB_DIR/.codex/auth.json"
-    else
+    if [ ! -f "$CODEX_AUTH_SRC" ]; then
         echo "ERROR: agents/codex_non_api/auth.json not found — GPT-5.4 judge needs subscription auth" >&2
         exit 1
     fi
+    # Touch a placeholder so apptainer has something to bind onto inside .codex/.
+    : > "$JOB_DIR/.codex/auth.json"
     if ! grep -q "forced_login_method" "$JOB_DIR/.codex/config.toml" 2>/dev/null; then
         printf '\nforced_login_method = "chatgpt"\n' >> "$JOB_DIR/.codex/config.toml"
     fi
@@ -187,6 +191,7 @@ if [ "$RUN_GPT" = true ]; then
         --env OPENAI_API_KEY="" \
         --env PYTHONNOUSERSITE="1" \
         --bind "${JOB_TMP}:/tmp" \
+        --bind "${CODEX_AUTH_SRC}:/home/ben/.codex/auth.json" \
         --home "${JOB_DIR}:/home/ben" \
         --pwd "/home/ben/task" \
         --writable-tmpfs \
