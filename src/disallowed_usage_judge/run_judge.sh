@@ -111,10 +111,9 @@ mkdir -p "$JOB_DIR" "$JOB_TMP"
 # Copy task directory
 cp -r "$RESULT_DIR/task" "$JOB_DIR/task"
 
-# Remove any pre-existing judgement files from the task dir so stale values
+# Remove any pre-existing judgement file from the task dir so stale values
 # from earlier runs can't leak into this judge's output when the CLI crashes.
-rm -f "$JOB_DIR/task/contamination_judgement.txt"
-rm -f "$JOB_DIR/task/disallowed_model_judgement.txt"
+rm -f "$JOB_DIR/task/judgement.json"
 
 # Copy trace file to parent directory (not task directory)
 cp "$TRACE_FILE" "$JOB_DIR/$TRACE_NAME"
@@ -165,12 +164,10 @@ fi
 # confused with fresh output when a CLI fails. Leave the skipped judge's
 # files alone so aggregation can still use them.
 if [ "$RUN_GPT" = true ]; then
-    rm -f "$RESULT_DIR/contamination_judgement_gpt5_4_rerun.txt"
-    rm -f "$RESULT_DIR/disallowed_model_judgement_gpt5_4_rerun.txt"
+    rm -f "$RESULT_DIR/judgement_gpt5_4_rerun.json"
 fi
 if [ "$RUN_SONNET" = true ]; then
-    rm -f "$RESULT_DIR/contamination_judgement_sonnet4_6_rerun.txt"
-    rm -f "$RESULT_DIR/disallowed_model_judgement_sonnet4_6_rerun.txt"
+    rm -f "$RESULT_DIR/judgement_sonnet4_6_rerun.json"
 fi
 
 # ============================================================
@@ -202,24 +199,16 @@ if [ "$RUN_GPT" = true ]; then
         echo "  GPT-5.4 judge output saved"
     fi
 
-    # Save GPT-5.4 judgements with model-specific suffix
-    if [ -f "$JOB_DIR/task/contamination_judgement.txt" ]; then
-        cp "$JOB_DIR/task/contamination_judgement.txt" "$RESULT_DIR/contamination_judgement_gpt5_4_rerun.txt"
-        echo "  GPT-5.4 Contamination: $(cat "$RESULT_DIR/contamination_judgement_gpt5_4_rerun.txt")"
+    # Save GPT-5.4 judgement JSON with model-specific suffix
+    if [ -f "$JOB_DIR/task/judgement.json" ]; then
+        cp "$JOB_DIR/task/judgement.json" "$RESULT_DIR/judgement_gpt5_4_rerun.json"
+        echo "  GPT-5.4 judgement: $(cat "$RESULT_DIR/judgement_gpt5_4_rerun.json")"
     else
-        echo "  Warning: contamination_judgement.txt not created by GPT-5.4 judge"
+        echo "  Warning: judgement.json not created by GPT-5.4 judge"
     fi
 
-    if [ -f "$JOB_DIR/task/disallowed_model_judgement.txt" ]; then
-        cp "$JOB_DIR/task/disallowed_model_judgement.txt" "$RESULT_DIR/disallowed_model_judgement_gpt5_4_rerun.txt"
-        echo "  GPT-5.4 Model usage: $(cat "$RESULT_DIR/disallowed_model_judgement_gpt5_4_rerun.txt")"
-    else
-        echo "  Warning: disallowed_model_judgement.txt not created by GPT-5.4 judge"
-    fi
-
-    # Clean judgement files so the next judge starts fresh
-    rm -f "$JOB_DIR/task/contamination_judgement.txt"
-    rm -f "$JOB_DIR/task/disallowed_model_judgement.txt"
+    # Clean judgement file so the next judge starts fresh
+    rm -f "$JOB_DIR/task/judgement.json"
 fi
 
 # ============================================================
@@ -253,19 +242,12 @@ if [ "$RUN_SONNET" = true ]; then
         echo "  Sonnet 4.6 judge output saved"
     fi
 
-    # Save Sonnet 4.6 judgements with model-specific suffix
-    if [ -f "$JOB_DIR/task/contamination_judgement.txt" ]; then
-        cp "$JOB_DIR/task/contamination_judgement.txt" "$RESULT_DIR/contamination_judgement_sonnet4_6_rerun.txt"
-        echo "  Sonnet 4.6 Contamination: $(cat "$RESULT_DIR/contamination_judgement_sonnet4_6_rerun.txt")"
+    # Save Sonnet 4.6 judgement JSON with model-specific suffix
+    if [ -f "$JOB_DIR/task/judgement.json" ]; then
+        cp "$JOB_DIR/task/judgement.json" "$RESULT_DIR/judgement_sonnet4_6_rerun.json"
+        echo "  Sonnet 4.6 judgement: $(cat "$RESULT_DIR/judgement_sonnet4_6_rerun.json")"
     else
-        echo "  Warning: contamination_judgement.txt not created by Sonnet 4.6 judge"
-    fi
-
-    if [ -f "$JOB_DIR/task/disallowed_model_judgement.txt" ]; then
-        cp "$JOB_DIR/task/disallowed_model_judgement.txt" "$RESULT_DIR/disallowed_model_judgement_sonnet4_6_rerun.txt"
-        echo "  Sonnet 4.6 Model usage: $(cat "$RESULT_DIR/disallowed_model_judgement_sonnet4_6_rerun.txt")"
-    else
-        echo "  Warning: disallowed_model_judgement.txt not created by Sonnet 4.6 judge"
+        echo "  Warning: judgement.json not created by Sonnet 4.6 judge"
     fi
 fi
 
@@ -277,27 +259,10 @@ echo "========================================="
 echo "=== Aggregating Judge Results ==="
 echo "========================================="
 
-# Aggregate contamination judgement
-CONTAM_GPT=$(cat "$RESULT_DIR/contamination_judgement_gpt5_4_rerun.txt" 2>/dev/null || echo "")
-CONTAM_SONNET=$(cat "$RESULT_DIR/contamination_judgement_sonnet4_6_rerun.txt" 2>/dev/null || echo "")
-
-if echo "$CONTAM_GPT" | grep -qix "contamination detected" || echo "$CONTAM_SONNET" | grep -qix "contamination detected"; then
-    echo "contamination detected" > "$RESULT_DIR/contamination_judgement_rerun.txt"
-else
-    echo "no contamination detected" > "$RESULT_DIR/contamination_judgement_rerun.txt"
-fi
-echo "  Aggregated Contamination: $(cat "$RESULT_DIR/contamination_judgement_rerun.txt")"
-
-# Aggregate disallowed model judgement
-MODEL_GPT=$(cat "$RESULT_DIR/disallowed_model_judgement_gpt5_4_rerun.txt" 2>/dev/null || echo "")
-MODEL_SONNET=$(cat "$RESULT_DIR/disallowed_model_judgement_sonnet4_6_rerun.txt" 2>/dev/null || echo "")
-
-if echo "$MODEL_GPT" | grep -qix "disallowed use detected" || echo "$MODEL_SONNET" | grep -qix "disallowed use detected"; then
-    echo "disallowed use detected" > "$RESULT_DIR/disallowed_model_judgement_rerun.txt"
-else
-    echo "only allowed use detected" > "$RESULT_DIR/disallowed_model_judgement_rerun.txt"
-fi
-echo "  Aggregated Model usage: $(cat "$RESULT_DIR/disallowed_model_judgement_rerun.txt")"
+python "$SCRIPT_DIR/aggregate_judgement.py" \
+    --judge "gpt5_4=$RESULT_DIR/judgement_gpt5_4_rerun.json" \
+    --judge "sonnet4_6=$RESULT_DIR/judgement_sonnet4_6_rerun.json" \
+    --output "$RESULT_DIR/judge_result_rerun.json"
 
 echo ""
 echo "Judge completed successfully (GPT-5.4 + Sonnet 4.6)"

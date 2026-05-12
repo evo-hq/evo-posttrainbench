@@ -5,11 +5,10 @@
 #
 # Only the newest run (highest cluster_id) per (benchmark, model) is submitted.
 # Uses run_judge.sh --gpt-only under the hood, so the existing
-# contamination_judgement.txt / disallowed_model_judgement.txt are NOT touched;
-# the script only (re)writes the *_rerun.txt outputs plus the GPT-specific
-# contamination_judgement_gpt5_4_rerun.txt / disallowed_model_judgement_gpt5_4_rerun.txt.
-# The aggregated contamination_judgement_rerun.txt is rebuilt from the new
-# GPT-5.4 result and the existing Sonnet 4.6 *_rerun.txt (if present).
+# judgement_*.json / judge_result.json from the initial run are NOT touched;
+# the script only (re)writes the GPT-specific judgement_gpt5_4_rerun.json.
+# The aggregated judge_result_rerun.json is rebuilt from the new GPT-5.4
+# result and the existing judgement_sonnet4_6_rerun.json (if present).
 #
 # This script avoids sourcing set_env_vars.sh because the module-loading block
 # fails on nodes without tclsh; instead it exports POST_TRAIN_BENCH_RESULTS_DIR

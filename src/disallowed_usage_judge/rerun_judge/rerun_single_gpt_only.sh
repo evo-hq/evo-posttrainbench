@@ -2,8 +2,7 @@
 #
 # Rerun only the GPT-5.4 judge on a single result directory.
 # Thin wrapper around run_judge.sh --gpt-only (which writes _rerun outputs
-# and leaves the existing contamination_judgement.txt / disallowed_model_judgement.txt
-# untouched).
+# and leaves the existing judgement_*.json / judge_result.json untouched).
 #
 # Usage: rerun_single_gpt_only.sh <result_dir>
 

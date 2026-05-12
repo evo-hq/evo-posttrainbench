@@ -1,52 +1,38 @@
 #!/usr/bin/env python3
-import os
 import csv
+import json
+import os
 
 OUTPUT_PREFIX = "contamination_"        # e.g. "contamination_method.csv"
 
 
-def load_contamination(contamination_path: str):
-    """
-    Return True, False, "IMPORTANT ERR", or "ERR" based on contamination judgement.
-    """
-    if not os.path.exists(contamination_path):
-        return "ERR"
-    try:
-        with open(contamination_path, "r") as f:
-            content = f.read().strip()
-    except Exception:
-        return "ERR"
-    if content == "contamination detected":
-        return True
-    elif content == "no contamination detected":
-        return False
-    else:
-        return "IMPORTANT ERR"
+def load_judge_result(run_dir: str) -> tuple:
+    """Return (contamination, disallowed_model) read from judge_result.json.
 
-
-def load_disallowed_model(disallowed_path: str):
+    Each value is True/False on success, "ERR" if the file is missing, or
+    "IMPORTANT ERR" if the file exists but is malformed.
     """
-    Return True, False, "IMPORTANT ERR", or "ERR" based on disallowed model judgement.
-    """
-    if not os.path.exists(disallowed_path):
-        return "ERR"
+    path = os.path.join(run_dir, "judge_result.json")
+    if not os.path.exists(path):
+        return "ERR", "ERR"
     try:
-        with open(disallowed_path, "r") as f:
-            content = f.read().strip()
-    except Exception:
-        return "ERR"
-    if content == "disallowed use detected":
-        return True
-    elif content == "only allowed use detected":
-        return False
-    else:
-        return "IMPORTANT ERR"
+        with open(path, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return "IMPORTANT ERR", "IMPORTANT ERR"
+
+    def coerce(field: str):
+        if field not in data or not isinstance(data[field], bool):
+            return "IMPORTANT ERR"
+        return data[field]
+
+    return coerce("contamination"), coerce("disallowed_model")
 
 
 def combine_results(contamination, disallowed_model):
     """
     Combine contamination and disallowed model results into a single cell value.
-    
+
     Returns:
         - "" if no illegal use detected (and no contamination)
         - "M" if disallowed model detected (but no contamination)
@@ -62,7 +48,7 @@ def combine_results(contamination, disallowed_model):
         if disallowed_model in ("ERR", "IMPORTANT ERR"):
             errors.append(f"M:{disallowed_model}")
         return " ".join(errors)
-    
+
     # Both are boolean now
     if disallowed_model and contamination:
         return "MC"
@@ -133,11 +119,7 @@ def process_method(method_path: str, method_name: str):
                 key = (bench, model)
                 if key in latest_runs:
                     run_dir = latest_runs[key]["path"]
-                    contamination_path = os.path.join(run_dir, "contamination_judgement.txt")
-                    disallowed_path = os.path.join(run_dir, "disallowed_model_judgement.txt")
-                    
-                    contamination = load_contamination(contamination_path)
-                    disallowed_model = load_disallowed_model(disallowed_path)
+                    contamination, disallowed_model = load_judge_result(run_dir)
                     cell = combine_results(contamination, disallowed_model)
                 row.append(cell)
             writer.writerow(row)

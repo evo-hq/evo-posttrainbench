@@ -8,11 +8,22 @@ Usage:
     python aggregate_rerun_results.py --diff-only         # Only show changed judgements
 """
 
-import csv
 import argparse
+import csv
 from collections import defaultdict
 from pathlib import Path
-from utils import get_result_dirs, parse_result_dir, get_trace_file, read_judgement
+
+from utils import get_result_dirs, get_trace_file, parse_result_dir, read_judge_result
+
+
+def _field(judgement: dict | None, key: str):
+    """Return the boolean field from a judge_result.json, or None if unavailable."""
+    if judgement is None:
+        return None
+    value = judgement.get(key)
+    if not isinstance(value, bool):
+        return None
+    return value
 
 
 def main():
@@ -39,19 +50,22 @@ def main():
         except ValueError:
             continue
 
-        contamination_orig = read_judgement(result_dir / 'contamination_judgement.txt')
-        contamination_rerun = read_judgement(result_dir / 'contamination_judgement_rerun.txt')
-        model_orig = read_judgement(result_dir / 'disallowed_model_judgement.txt')
-        model_rerun = read_judgement(result_dir / 'disallowed_model_judgement_rerun.txt')
+        orig = read_judge_result(result_dir / 'judge_result.json')
+        rerun = read_judge_result(result_dir / 'judge_result_rerun.json')
+
+        contamination_orig = _field(orig, 'contamination')
+        contamination_rerun = _field(rerun, 'contamination')
+        model_orig = _field(orig, 'disallowed_model')
+        model_rerun = _field(rerun, 'disallowed_model')
 
         _, trace_source = get_trace_file(result_dir)
         trace_source = trace_source.replace('solve_', '').replace('.txt', '') if trace_source else 'none'
 
-        contamination_changed = contamination_orig != contamination_rerun and contamination_rerun is not None
-        model_changed = model_orig != model_rerun and model_rerun is not None
+        contamination_changed = contamination_rerun is not None and contamination_orig != contamination_rerun
+        model_changed = model_rerun is not None and model_orig != model_rerun
 
         stats['total'] += 1
-        if contamination_rerun is not None:
+        if rerun is not None:
             stats['has_rerun'] += 1
             if contamination_changed:
                 stats['contamination_changed'] += 1
@@ -98,11 +112,11 @@ def main():
             print(f"  Model: {result['model']}")
             print(f"  Trace: {result['trace_source']}")
 
-            if result['contamination_rerun']:
+            if result['contamination_rerun'] is not None:
                 marker = " [CHANGED]" if result['contamination_changed'] else ""
                 print(f"  Contamination: {result['contamination_orig']} -> {result['contamination_rerun']}{marker}")
 
-            if result['model_rerun']:
+            if result['model_rerun'] is not None:
                 marker = " [CHANGED]" if result['model_changed'] else ""
                 print(f"  Model Usage: {result['model_orig']} -> {result['model_rerun']}{marker}")
 

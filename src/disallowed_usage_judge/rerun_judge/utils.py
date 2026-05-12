@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Shared utilities for rerun judge scripts."""
 
+import json
 import os
 from pathlib import Path
 
@@ -62,7 +63,7 @@ def get_result_dirs(
             if benchmark_pattern and benchmark_pattern.lower() not in result_dir.name.lower():
                 continue
 
-            if skip_existing and (result_dir / 'contamination_judgement_rerun.txt').exists():
+            if skip_existing and (result_dir / 'judge_result_rerun.json').exists():
                 continue
 
             result_dirs.append(result_dir)
@@ -134,7 +135,6 @@ def parse_result_dir(result_dir: Path) -> dict:
 
 def get_benchmark_name(benchmark: str) -> str:
     """Get human-readable benchmark name from info.json if available."""
-    import json
     repo_root = get_repo_root()
     benchmark_file = repo_root / 'src' / 'eval' / 'tasks' / benchmark / 'info.json'
 
@@ -163,8 +163,14 @@ def get_trace_file(result_dir: Path) -> tuple[Path, str] | tuple[None, None]:
     return None, None
 
 
-def read_judgement(filepath: Path) -> str | None:
-    """Read a judgement file and return its content, or None if missing."""
+def read_judge_result(filepath: Path) -> dict | None:
+    """Read a judge_result.json (or per-judge judgement_*.json) file.
+
+    Returns the parsed dict, or None if the file is missing or unreadable.
+    """
     if not filepath.exists():
         return None
-    return filepath.read_text().strip()
+    try:
+        return json.loads(filepath.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
