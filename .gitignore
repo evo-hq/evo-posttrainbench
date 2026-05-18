@@ -9,9 +9,6 @@ agents/*/oauth_token*
 
 .claude 
 
-AGENTS.md
-CLAUDE.md
-
 logs
 .vscode
 
