@@ -1,38 +1,59 @@
 #!/bin/bash
 #
-# Run the contamination judge on a result directory using two models:
-#   1. GPT-5.4 (via codex CLI)
-#   2. Claude Sonnet 4.6 (via claude CLI)
+# Run the disallowed-usage judges on a result directory.
 #
-# Results are aggregated: if either model flags an issue, the overall result is flagged.
-# All outputs are always saved with the _rerun suffix so original judge outputs
-# produced by src/run_task.sh are preserved.
+# Three judges:
+#   1. GPT-5.4 contamination/base-model judge (via codex CLI)
+#   2. Claude Sonnet 4.6 contamination/base-model judge (via claude CLI)
+#   3. GPT-5.4 third-party API usage judge (via codex CLI)
 #
-# Usage: run_judge.sh [--gpt-only|--sonnet-only] <result_dir>
+# Results from judges 1 and 2 are aggregated into judge_result_rerun.json:
+# if either flags an issue, the overall result is flagged.
+#
+# Judge 3 has a different schema (`disallowed_api_usage` instead of
+# `contamination`/`disallowed_model`) and is written to its own files
+# `judgement_api_rerun.json` and `judge_output_api_rerun.{json,txt}` — it is
+# NOT folded into judge_result_rerun.json.
+#
+# All outputs are always saved with the _rerun suffix so original judge
+# outputs produced by src/run_task.sh are preserved.
+#
+# Usage: run_judge.sh [--gpt-only|--sonnet-only|--api-only] <result_dir>
 #
 # Options:
-#   --gpt-only     Only rerun the GPT-5.4 judge (skip Sonnet); aggregation still runs
-#                  using the existing Sonnet _rerun output if present.
-#   --sonnet-only  Only rerun the Sonnet 4.6 judge (skip GPT); aggregation still runs
-#                  using the existing GPT _rerun output if present.
-#
-# The judge analyzes the task directory and ../solve_parsed.txt to determine:
-# - Whether benchmark data was used for training (contamination)
-# - Whether only the allowed base model was fine-tuned
+#   --gpt-only     Only rerun the GPT-5.4 contamination judge + the API judge
+#                  (skip Sonnet); aggregation still runs using the existing
+#                  Sonnet _rerun output if present.
+#   --sonnet-only  Only rerun the Sonnet 4.6 contamination judge (skip both
+#                  GPT-based judges); aggregation still runs using the existing
+#                  GPT _rerun output if present.
+#   --api-only     Only rerun the GPT-5.4 third-party API usage judge
+#                  (skip both contamination judges and skip aggregation).
 
 set -e
 
 # Parse arguments
 RUN_GPT=true
 RUN_SONNET=true
+RUN_API=true
+MODE="all"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --gpt-only)
+            MODE="gpt-only"
             RUN_SONNET=false
             shift
             ;;
         --sonnet-only)
+            MODE="sonnet-only"
             RUN_GPT=false
+            RUN_API=false
+            shift
+            ;;
+        --api-only)
+            MODE="api-only"
+            RUN_GPT=false
+            RUN_SONNET=false
             shift
             ;;
         *)
@@ -42,13 +63,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ "$RUN_GPT" = false ] && [ "$RUN_SONNET" = false ]; then
-    echo "Error: cannot combine --gpt-only and --sonnet-only" >&2
-    exit 1
-fi
-
 if [ -z "$RESULT_DIR" ]; then
-    echo "Usage: $0 [--gpt-only|--sonnet-only] <result_dir>" >&2
+    echo "Usage: $0 [--gpt-only|--sonnet-only|--api-only] <result_dir>" >&2
     exit 1
 fi
 
@@ -87,18 +103,25 @@ MODEL_HF=$(echo "$MODEL_PART" | sed 's/_/\//')
 
 echo "Running judge on: $RESULT_DIR"
 echo "  Benchmark: $BENCHMARK | Model: $MODEL_HF | Trace: $TRACE_NAME"
-if [ "$RUN_GPT" = true ] && [ "$RUN_SONNET" = true ]; then
-    echo "  Mode: both judges (GPT-5.4 + Sonnet 4.6), outputs suffixed with _rerun"
-elif [ "$RUN_GPT" = true ]; then
-    echo "  Mode: GPT-5.4 only (Sonnet skipped), outputs suffixed with _rerun"
-else
-    echo "  Mode: Sonnet 4.6 only (GPT skipped), outputs suffixed with _rerun"
-fi
+case "$MODE" in
+    all)         echo "  Mode: all judges (GPT-5.4 contamination + Sonnet 4.6 contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
+    gpt-only)    echo "  Mode: GPT-5.4 contamination + GPT-5.4 API (Sonnet skipped), outputs suffixed with _rerun" ;;
+    sonnet-only) echo "  Mode: Sonnet 4.6 contamination only (GPT-based judges skipped), outputs suffixed with _rerun" ;;
+    api-only)    echo "  Mode: GPT-5.4 API only (contamination judges skipped), outputs suffixed with _rerun" ;;
+esac
 
-# Generate judge prompt
-JUDGE_PROMPT=$(python "$SCRIPT_DIR/get_judge_prompt.py" \
-    --benchmark-id "$BENCHMARK" \
-    --model "$MODEL_HF")
+# Generate judge prompts
+if [ "$RUN_GPT" = true ] || [ "$RUN_SONNET" = true ]; then
+    JUDGE_PROMPT=$(python "$SCRIPT_DIR/get_judge_prompt.py" \
+        --benchmark-id "$BENCHMARK" \
+        --model "$MODEL_HF")
+fi
+if [ "$RUN_API" = true ]; then
+    JUDGE_API_PROMPT=$(python "$SCRIPT_DIR/get_judge_prompt.py" \
+        --benchmark-id "$BENCHMARK" \
+        --model "$MODEL_HF" \
+        --kind api)
+fi
 
 # Create temporary working directory
 TMP_DIR=$(mktemp -d)
@@ -134,15 +157,15 @@ if [ -f "$REPO_ROOT/src/eval/tasks/$BENCHMARK/test_data.json" ]; then
     cp "$REPO_ROOT/src/eval/tasks/$BENCHMARK/test_data.json" "$JOB_DIR/test_data.json"
 fi
 
-# Set up codex config + ChatGPT Pro subscription auth (only when GPT judge runs).
+# Set up codex config + ChatGPT Pro subscription auth (only when a GPT-based judge runs).
 # auth.json itself is bind-mounted from the shared location at apptainer exec
 # time so codex can write the rotated refresh token back to the source and the
 # next job picks it up instead of reusing a stale single-use refresh token.
 CODEX_AUTH_SRC="$REPO_ROOT/agents/codex_non_api/auth.json"
-if [ "$RUN_GPT" = true ]; then
+if [ "$RUN_GPT" = true ] || [ "$RUN_API" = true ]; then
     cp -r "$REPO_ROOT/containers/other_home_data/.codex" "$JOB_DIR/"
     if [ ! -f "$CODEX_AUTH_SRC" ]; then
-        echo "ERROR: agents/codex_non_api/auth.json not found — GPT-5.4 judge needs subscription auth" >&2
+        echo "ERROR: agents/codex_non_api/auth.json not found — GPT-5.4 judges need subscription auth" >&2
         exit 1
     fi
     # Touch a placeholder so apptainer has something to bind onto inside .codex/.
@@ -172,6 +195,9 @@ if [ "$RUN_GPT" = true ]; then
 fi
 if [ "$RUN_SONNET" = true ]; then
     rm -f "$RESULT_DIR/judgement_sonnet4_6_rerun.json"
+fi
+if [ "$RUN_API" = true ]; then
+    rm -f "$RESULT_DIR/judgement_api_rerun.json"
 fi
 
 # ============================================================
@@ -254,10 +280,52 @@ if [ "$RUN_SONNET" = true ]; then
         echo "ERROR: judgement.json not created by Sonnet 4.6 judge (see $RESULT_DIR/judge_output_sonnet4_6_rerun.txt)" >&2
         exit 1
     fi
+
+    # Clean judgement file so the next judge starts fresh
+    rm -f "$JOB_DIR/task/judgement.json"
 fi
 
 # ============================================================
-# Aggregate results: flag if either judge flags
+# Judge 3: third-party API usage (GPT-5.4 only)
+# ============================================================
+if [ "$RUN_API" = true ]; then
+    echo ""
+    echo "========================================="
+    echo "=== Judge 3: third-party API usage (GPT-5.4) ==="
+    echo "========================================="
+
+    JUDGE_OUTPUT_API="$RESULT_DIR/judge_output_api_rerun.json"
+    apptainer exec \
+        -c \
+        --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
+        --env CODEX_API_KEY="" \
+        --env OPENAI_API_KEY="" \
+        --env PYTHONNOUSERSITE="1" \
+        --bind "${JOB_TMP}:/tmp" \
+        --bind "${CODEX_AUTH_SRC}:/home/ben/.codex/auth.json" \
+        --home "${JOB_DIR}:/home/ben" \
+        --pwd "/home/ben/task" \
+        --writable-tmpfs \
+        "${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif" \
+        codex --search -a never exec --json -c model_reasoning_summary=detailed -c model_reasoning_effort=xhigh --skip-git-repo-check --yolo --model "gpt-5.4" "$JUDGE_API_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_API"
+
+    python "$REPO_ROOT/agents/codex/human_readable_trace.py" "$JUDGE_OUTPUT_API" -o "$RESULT_DIR/judge_output_api_rerun.txt"
+    echo "  API judge output saved"
+
+    if [ -f "$JOB_DIR/task/judgement.json" ]; then
+        cp "$JOB_DIR/task/judgement.json" "$RESULT_DIR/judgement_api_rerun.json"
+        echo "  API judgement: $(cat "$RESULT_DIR/judgement_api_rerun.json")"
+    else
+        echo "ERROR: judgement.json not created by API judge (see $RESULT_DIR/judge_output_api_rerun.txt)" >&2
+        exit 1
+    fi
+fi
+
+# ============================================================
+# Aggregate: contamination judges OR'd together, API verdict folded in.
+# Always re-aggregate so judge_result_rerun.json reflects the latest run.
+# All three per-judge rerun files must exist; aggregate_judgement.py fails
+# loud if any is missing.
 # ============================================================
 echo ""
 echo "========================================="
@@ -267,7 +335,8 @@ echo "========================================="
 python "$SCRIPT_DIR/aggregate_judgement.py" \
     --judge "gpt5_4=$RESULT_DIR/judgement_gpt5_4_rerun.json" \
     --judge "sonnet4_6=$RESULT_DIR/judgement_sonnet4_6_rerun.json" \
+    --judge "api=$RESULT_DIR/judgement_api_rerun.json" \
     --output "$RESULT_DIR/judge_result_rerun.json"
 
 echo ""
-echo "Judge completed successfully (GPT-5.4 + Sonnet 4.6)"
+echo "Judge completed successfully (mode: $MODE)"

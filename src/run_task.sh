@@ -291,12 +291,47 @@ if [ -f "${JOB_DIR}/task/judgement.json" ]; then
     cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_sonnet4_6.json"
 fi
 
-# ---- Aggregate: flag if either judge flags ----
+# Clean judgement file so the API judge starts fresh
+rm -f "${JOB_DIR}/task/judgement.json"
+
+# ---- Judge 3: third-party API usage (GPT-5.4 only) ----
+echo "=== Judge 3: third-party API usage (GPT-5.4 only) ==="
+
+JUDGE_API_TASK=$(python src/disallowed_usage_judge/get_judge_prompt.py --benchmark-id "${EVALUATION_TASK}" --model "${MODEL_TO_TRAIN}" --kind api)
+
+with_huggingface_overlay apptainer exec \
+    --nv \
+    -c \
+    --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
+    --env HF_HOME="${HF_HOME_NEW}" \
+    --env CODEX_API_KEY="" \
+    --env OPENAI_API_KEY="" \
+    --env VLLM_API_KEY="inspectai" \
+    --env PYTHONNOUSERSITE="1" \
+    --bind "${JOB_TMP}:/tmp" \
+    --bind "${HF_MERGED}:${HF_HOME_NEW}" \
+    --bind "${JUDGE_CODEX_AUTH_SRC}:/home/ben/.codex/auth.json" \
+    --home "${JOB_DIR}:/home/ben" \
+    --pwd "/home/ben/task" \
+    --writable-tmpfs \
+    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif codex --search -a never exec --json -c model_reasoning_summary=detailed -c model_reasoning_effort=xhigh --skip-git-repo-check --yolo --model "gpt-5.4" "$JUDGE_API_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_api.json"
+
+python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output_api.json" -o "${EVAL_DIR}/judge_output_api.txt"
+
+if [ -f "${JOB_DIR}/task/judgement.json" ]; then
+    cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_api.json"
+else
+    echo "ERROR: judgement.json not created by API judge (see ${EVAL_DIR}/judge_output_api.txt)" >&2
+    exit 1
+fi
+
+# ---- Aggregate: flag if either contamination judge flags; fold in API judge ----
 echo "=== Aggregating Judge Results ==="
 
 python src/disallowed_usage_judge/aggregate_judgement.py \
     --judge "gpt5_4=${EVAL_DIR}/judgement_gpt5_4.json" \
     --judge "sonnet4_6=${EVAL_DIR}/judgement_sonnet4_6.json" \
+    --judge "api=${EVAL_DIR}/judgement_api.json" \
     --output "${EVAL_DIR}/judge_result.json"
 
 echo "============================="

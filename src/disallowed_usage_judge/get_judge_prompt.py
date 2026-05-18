@@ -26,33 +26,43 @@ def get_benchmark_name(benchmark_id: str) -> str:
         return json.load(f)['benchmark']
 
 
-def generate_prompt(benchmark: str, model: str, benchmark_id: str = None) -> str:
+PROMPT_FILES = {
+    "data_and_model": "prompt.txt",
+    "api": "prompt_api_judge.md",
+}
+
+
+def generate_prompt(benchmark: str, model: str, benchmark_id: str = None, kind: str = "data_and_model") -> str:
     """Generate the judge prompt with the given benchmark and model."""
     base_prompt = os.environ.get('POST_TRAIN_BENCH_PROMPT', 'prompt')
     if "mock" in base_prompt:
         return "Just do nothing and return."
 
-    prompt_path = Path(__file__).parent / "prompt.txt"
+    if kind not in PROMPT_FILES:
+        raise ValueError(f"Unknown prompt kind: {kind!r} (expected one of {list(PROMPT_FILES)})")
+
+    prompt_path = Path(__file__).parent / PROMPT_FILES[kind]
     prompt = prompt_path.read_text()
 
     prompt = prompt.replace("{model}", model)
     prompt = prompt.replace("{benchmark}", benchmark)
 
-    allowed_data_examples = ""
-    disallowed_data_examples = ""
-    if benchmark_id:
-        allowed, disallowed = load_data_examples(benchmark_id)
-        if allowed:
-            allowed_data_examples = "- In particular, the following datasets are allowed (not exhaustive):\n"
-            for data in allowed:
-                allowed_data_examples += f"  - {data}\n"
-        if disallowed:
-            disallowed_data_examples = "- In particular, the following datasets are not allowed (not exhaustive):\n"
-            for data in disallowed:
-                disallowed_data_examples += f"  - {data}\n"
-    prompt = prompt.replace("{allowed_data_examples}", allowed_data_examples)
-    prompt = prompt.replace("{disallowed_data_examples}", disallowed_data_examples)
-    
+    if kind == "data_and_model":
+        allowed_data_examples = ""
+        disallowed_data_examples = ""
+        if benchmark_id:
+            allowed, disallowed = load_data_examples(benchmark_id)
+            if allowed:
+                allowed_data_examples = "- In particular, the following datasets are allowed (not exhaustive):\n"
+                for data in allowed:
+                    allowed_data_examples += f"  - {data}\n"
+            if disallowed:
+                disallowed_data_examples = "- In particular, the following datasets are not allowed (not exhaustive):\n"
+                for data in disallowed:
+                    disallowed_data_examples += f"  - {data}\n"
+        prompt = prompt.replace("{allowed_data_examples}", allowed_data_examples)
+        prompt = prompt.replace("{disallowed_data_examples}", disallowed_data_examples)
+
     return prompt
 
 
@@ -60,10 +70,17 @@ def main():
     parser = argparse.ArgumentParser(description="Generate judge prompt with trace reference")
     parser.add_argument("--benchmark-id", type=str, required=True, help="Benchmark ID (folder name)")
     parser.add_argument("--model", type=str, required=True, help="Model name")
+    parser.add_argument(
+        "--kind",
+        type=str,
+        choices=sorted(PROMPT_FILES),
+        default="data_and_model",
+        help="Which judge prompt to emit: 'data_and_model' (contamination + base-model check) or 'api' (third-party API usage check).",
+    )
     args = parser.parse_args()
 
     benchmark_name = get_benchmark_name(args.benchmark_id)
-    print(generate_prompt(benchmark_name, args.model, args.benchmark_id))
+    print(generate_prompt(benchmark_name, args.model, args.benchmark_id, args.kind))
 
 
 if __name__ == "__main__":
