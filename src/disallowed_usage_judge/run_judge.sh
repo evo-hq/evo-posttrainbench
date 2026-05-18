@@ -4,7 +4,7 @@
 #
 # Three judges:
 #   1. GPT-5.4 contamination/base-model judge (via codex CLI)
-#   2. DeepSeek V4 Flash Free contamination/base-model judge (via opencode CLI)
+#   2. Kimi K2.6 contamination/base-model judge (via opencode CLI)
 #   3. GPT-5.4 third-party API usage judge (via codex CLI)
 #
 # Results from judges 1 and 2 are aggregated into judge_result_rerun.json:
@@ -18,13 +18,13 @@
 # All outputs are always saved with the _rerun suffix so original judge
 # outputs produced by src/run_task.sh are preserved.
 #
-# Usage: run_judge.sh [--gpt-only|--deepseek-only|--api-only] <result_dir>
+# Usage: run_judge.sh [--gpt-only|--kimi-only|--api-only] <result_dir>
 #
 # Options:
 #   --gpt-only      Only rerun the GPT-5.4 contamination judge + the API judge
-#                   (skip DeepSeek); aggregation still runs using the existing
-#                   DeepSeek _rerun output if present.
-#   --deepseek-only Only rerun the DeepSeek V4 Flash Free contamination judge
+#                   (skip Kimi); aggregation still runs using the existing
+#                   Kimi _rerun output if present.
+#   --kimi-only     Only rerun the Kimi K2.6 contamination judge
 #                   (skip both GPT-based judges); aggregation still runs using
 #                   the existing GPT _rerun output if present.
 #   --api-only      Only rerun the GPT-5.4 third-party API usage judge
@@ -34,18 +34,18 @@ set -e
 
 # Parse arguments
 RUN_GPT=true
-RUN_DEEPSEEK=true
+RUN_KIMI=true
 RUN_API=true
 MODE="all"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --gpt-only)
             MODE="gpt-only"
-            RUN_DEEPSEEK=false
+            RUN_KIMI=false
             shift
             ;;
-        --deepseek-only)
-            MODE="deepseek-only"
+        --kimi-only)
+            MODE="kimi-only"
             RUN_GPT=false
             RUN_API=false
             shift
@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
         --api-only)
             MODE="api-only"
             RUN_GPT=false
-            RUN_DEEPSEEK=false
+            RUN_KIMI=false
             shift
             ;;
         *)
@@ -64,7 +64,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$RESULT_DIR" ]; then
-    echo "Usage: $0 [--gpt-only|--deepseek-only|--api-only] <result_dir>" >&2
+    echo "Usage: $0 [--gpt-only|--kimi-only|--api-only] <result_dir>" >&2
     exit 1
 fi
 
@@ -104,14 +104,14 @@ MODEL_HF=$(echo "$MODEL_PART" | sed 's/_/\//')
 echo "Running judge on: $RESULT_DIR"
 echo "  Benchmark: $BENCHMARK | Model: $MODEL_HF | Trace: $TRACE_NAME"
 case "$MODE" in
-    all)           echo "  Mode: all judges (GPT-5.4 contamination + DeepSeek V4 Flash Free contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
-    gpt-only)      echo "  Mode: GPT-5.4 contamination + GPT-5.4 API (DeepSeek skipped), outputs suffixed with _rerun" ;;
-    deepseek-only) echo "  Mode: DeepSeek V4 Flash Free contamination only (GPT-based judges skipped), outputs suffixed with _rerun" ;;
-    api-only)      echo "  Mode: GPT-5.4 API only (contamination judges skipped), outputs suffixed with _rerun" ;;
+    all)       echo "  Mode: all judges (GPT-5.4 contamination + Kimi K2.6 contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
+    gpt-only)  echo "  Mode: GPT-5.4 contamination + GPT-5.4 API (Kimi skipped), outputs suffixed with _rerun" ;;
+    kimi-only) echo "  Mode: Kimi K2.6 contamination only (GPT-based judges skipped), outputs suffixed with _rerun" ;;
+    api-only)  echo "  Mode: GPT-5.4 API only (contamination judges skipped), outputs suffixed with _rerun" ;;
 esac
 
 # Generate judge prompts
-if [ "$RUN_GPT" = true ] || [ "$RUN_DEEPSEEK" = true ]; then
+if [ "$RUN_GPT" = true ] || [ "$RUN_KIMI" = true ]; then
     JUDGE_PROMPT=$(python "$SCRIPT_DIR/get_judge_prompt.py" \
         --benchmark-id "$BENCHMARK" \
         --model "$MODEL_HF")
@@ -175,11 +175,11 @@ if [ "$RUN_GPT" = true ] || [ "$RUN_API" = true ]; then
     fi
 fi
 
-# Ensure OPENCODE_API_KEY is available when the DeepSeek judge runs. opencode
+# Ensure OPENCODE_API_KEY is available when the Kimi judge runs. opencode
 # reads it via {env:OPENCODE_API_KEY} from opencode.json (see solve.sh).
-if [ "$RUN_DEEPSEEK" = true ]; then
+if [ "$RUN_KIMI" = true ]; then
     if [ -z "${OPENCODE_API_KEY:-}" ]; then
-        echo "ERROR: OPENCODE_API_KEY is not set — DeepSeek V4 Flash Free judge needs an opencode API key" >&2
+        echo "ERROR: OPENCODE_API_KEY is not set — Kimi K2.6 judge needs an opencode API key" >&2
         exit 1
     fi
 fi
@@ -191,8 +191,8 @@ fi
 if [ "$RUN_GPT" = true ]; then
     rm -f "$RESULT_DIR/judgement_gpt5_4_rerun.json"
 fi
-if [ "$RUN_DEEPSEEK" = true ]; then
-    rm -f "$RESULT_DIR/judgement_deepseek_rerun.json"
+if [ "$RUN_KIMI" = true ]; then
+    rm -f "$RESULT_DIR/judgement_kimi_rerun.json"
 fi
 if [ "$RUN_API" = true ]; then
     rm -f "$RESULT_DIR/judgement_api_rerun.json"
@@ -240,12 +240,12 @@ if [ "$RUN_GPT" = true ]; then
 fi
 
 # ============================================================
-# Judge 2: DeepSeek V4 Flash Free via opencode CLI
+# Judge 2: Kimi K2.6 via opencode CLI
 # ============================================================
-if [ "$RUN_DEEPSEEK" = true ]; then
+if [ "$RUN_KIMI" = true ]; then
     echo ""
     echo "========================================="
-    echo "=== Judge 2: DeepSeek V4 Flash Free (opencode CLI) ==="
+    echo "=== Judge 2: Kimi K2.6 (opencode CLI) ==="
     echo "========================================="
 
     # opencode requires opencode.json in the working directory for provider
@@ -264,7 +264,7 @@ if [ "$RUN_DEEPSEEK" = true ]; then
 }
 OPENCODE_EOF
 
-    JUDGE_OUTPUT_DEEPSEEK="$RESULT_DIR/judge_output_deepseek_rerun.json"
+    JUDGE_OUTPUT_KIMI="$RESULT_DIR/judge_output_kimi_rerun.json"
     apptainer exec \
         --containall \
         --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
@@ -275,18 +275,18 @@ OPENCODE_EOF
         --pwd "/home/ben/task" \
         --writable-tmpfs \
         "${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif" \
-        opencode run --model "opencode/deepseek-v4-flash-free" --format json "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_DEEPSEEK"
+        opencode run --model "opencode/kimi-k2.6" --format json "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_KIMI"
 
     # Decode the opencode JSONL trace into a human-readable text report
-    python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent opencode "$JUDGE_OUTPUT_DEEPSEEK" -o "$RESULT_DIR/judge_output_deepseek_rerun.txt"
-    echo "  DeepSeek V4 Flash Free judge output saved"
+    python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent opencode "$JUDGE_OUTPUT_KIMI" -o "$RESULT_DIR/judge_output_kimi_rerun.txt"
+    echo "  Kimi K2.6 judge output saved"
 
-    # Save DeepSeek judgement JSON with model-specific suffix
+    # Save Kimi judgement JSON with model-specific suffix
     if [ -f "$JOB_DIR/task/judgement.json" ]; then
-        cp "$JOB_DIR/task/judgement.json" "$RESULT_DIR/judgement_deepseek_rerun.json"
-        echo "  DeepSeek V4 Flash Free judgement: $(cat "$RESULT_DIR/judgement_deepseek_rerun.json")"
+        cp "$JOB_DIR/task/judgement.json" "$RESULT_DIR/judgement_kimi_rerun.json"
+        echo "  Kimi K2.6 judgement: $(cat "$RESULT_DIR/judgement_kimi_rerun.json")"
     else
-        echo "ERROR: judgement.json not created by DeepSeek V4 Flash Free judge (see $RESULT_DIR/judge_output_deepseek_rerun.txt)" >&2
+        echo "ERROR: judgement.json not created by Kimi K2.6 judge (see $RESULT_DIR/judge_output_kimi_rerun.txt)" >&2
         exit 1
     fi
 
@@ -343,7 +343,7 @@ echo "========================================="
 
 python "$SCRIPT_DIR/aggregate_judgement.py" \
     --judge "gpt5_4=$RESULT_DIR/judgement_gpt5_4_rerun.json" \
-    --judge "deepseek=$RESULT_DIR/judgement_deepseek_rerun.json" \
+    --judge "kimi=$RESULT_DIR/judgement_kimi_rerun.json" \
     --judge "api=$RESULT_DIR/judgement_api_rerun.json" \
     --output "$RESULT_DIR/judge_result_rerun.json"
 

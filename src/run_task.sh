@@ -251,11 +251,11 @@ fi
 # Clean judgement file so the next judge starts fresh
 rm -f "${JOB_DIR}/task/judgement.json"
 
-# ---- Judge 2: DeepSeek V4 Flash Free via opencode CLI ----
-echo "=== Judge 2: DeepSeek V4 Flash Free (opencode CLI) ==="
+# ---- Judge 2: Kimi K2.6 via opencode CLI ----
+echo "=== Judge 2: Kimi K2.6 (opencode CLI) ==="
 
 if [ -z "${OPENCODE_API_KEY:-}" ]; then
-    echo "ERROR: OPENCODE_API_KEY is not set — DeepSeek V4 Flash Free judge needs an opencode API key" >&2
+    echo "ERROR: OPENCODE_API_KEY is not set — Kimi K2.6 judge needs an opencode API key" >&2
     exit 1
 fi
 
@@ -288,12 +288,12 @@ with_huggingface_overlay apptainer exec \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \
-    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif opencode run --model "opencode/deepseek-v4-flash-free" --format json "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_deepseek.json"
+    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif opencode run --model "opencode/kimi-k2.6" --format json "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_kimi.json"
 
-python src/trace_parsing/parse_trace.py --agent opencode "${EVAL_DIR}/judge_output_deepseek.json" -o "${EVAL_DIR}/judge_output_deepseek.txt"
+python src/trace_parsing/parse_trace.py --agent opencode "${EVAL_DIR}/judge_output_kimi.json" -o "${EVAL_DIR}/judge_output_kimi.txt"
 
 if [ -f "${JOB_DIR}/task/judgement.json" ]; then
-    cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_deepseek.json"
+    cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_kimi.json"
 fi
 
 # Clean judgement file so the API judge starts fresh
@@ -335,7 +335,7 @@ echo "=== Aggregating Judge Results ==="
 
 python src/disallowed_usage_judge/aggregate_judgement.py \
     --judge "gpt5_4=${EVAL_DIR}/judgement_gpt5_4.json" \
-    --judge "deepseek=${EVAL_DIR}/judgement_deepseek.json" \
+    --judge "kimi=${EVAL_DIR}/judgement_kimi.json" \
     --judge "api=${EVAL_DIR}/judgement_api.json" \
     --output "${EVAL_DIR}/judge_result.json"
 
