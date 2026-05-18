@@ -209,7 +209,7 @@ if [ "$RUN_GPT" = true ]; then
 
     JUDGE_OUTPUT_GPT="$RESULT_DIR/judge_output_gpt5_4_rerun.json"
     apptainer exec \
-        -c \
+        --containall \
         --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
         --env CODEX_API_KEY="" \
         --env OPENAI_API_KEY="" \
@@ -266,7 +266,7 @@ OPENCODE_EOF
 
     JUDGE_OUTPUT_DEEPSEEK="$RESULT_DIR/judge_output_deepseek_rerun.json"
     apptainer exec \
-        -c \
+        --containall \
         --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
         --env OPENCODE_API_KEY="${OPENCODE_API_KEY}" \
         --env PYTHONNOUSERSITE="1" \
@@ -305,7 +305,7 @@ if [ "$RUN_API" = true ]; then
 
     JUDGE_OUTPUT_API="$RESULT_DIR/judge_output_api_rerun.json"
     apptainer exec \
-        -c \
+        --containall \
         --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
         --env CODEX_API_KEY="" \
         --env OPENAI_API_KEY="" \

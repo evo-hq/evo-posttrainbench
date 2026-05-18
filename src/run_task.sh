@@ -130,7 +130,7 @@ solve_task() {
     timeout --signal=TERM --kill-after=30s "$((NUM_HOURS * 60 + 5))m" \
     apptainer exec \
         --nv \
-        -c \
+        --containall \
         --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
         --env HF_HOME="${HF_HOME_NEW}" \
         --env ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
@@ -227,7 +227,7 @@ fi
 
 with_huggingface_overlay apptainer exec \
     --nv \
-    -c \
+    --containall \
     --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
     --env HF_HOME="${HF_HOME_NEW}" \
     --env CODEX_API_KEY="" \
@@ -277,7 +277,7 @@ OPENCODE_EOF
 
 with_huggingface_overlay apptainer exec \
     --nv \
-    -c \
+    --containall \
     --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
     --env HF_HOME="${HF_HOME_NEW}" \
     --env OPENCODE_API_KEY="${OPENCODE_API_KEY}" \
@@ -306,7 +306,7 @@ JUDGE_API_TASK=$(python src/disallowed_usage_judge/get_judge_prompt.py --benchma
 
 with_huggingface_overlay apptainer exec \
     --nv \
-    -c \
+    --containall \
     --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
     --env HF_HOME="${HF_HOME_NEW}" \
     --env CODEX_API_KEY="" \
