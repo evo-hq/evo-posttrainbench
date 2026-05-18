@@ -1,87 +1,13 @@
+"""Pretty-print OpenCode --format json logs into a human-readable transcript."""
+
 from __future__ import annotations
 
-import argparse
+import datetime
 import json
-import re
-import sys
 from pathlib import Path
 from typing import Any
 
-TIMESTAMP_PREFIX_RE = re.compile(r'^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] ')
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Convert OpenCode --format json logs into a human-readable transcript."
-        )
-    )
-    parser.add_argument(
-        "input",
-        type=Path,
-        help="Path to the JSON .jsonl file produced by OpenCode",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help=(
-            "Destination text file. Defaults to <input>.parsed.txt in the same "
-            "directory."
-        ),
-    )
-    parser.add_argument(
-        "--stdout",
-        action="store_true",
-        help="Print the parsed output to stdout instead of writing a file.",
-    )
-    return parser.parse_args()
-
-
-def default_output_path(input_path: Path) -> Path:
-    suffix = input_path.suffix or ""
-    if suffix:
-        return input_path.with_suffix(f"{suffix}.parsed.txt")
-    return input_path.with_name(f"{input_path.name}.parsed.txt")
-
-
-def pretty_format_json(obj: Any, indent_level: int = 0) -> str:
-    """Format JSON with actual newlines preserved in strings."""
-    indent_str = "  " * indent_level
-    next_indent = "  " * (indent_level + 1)
-
-    if isinstance(obj, dict):
-        if not obj:
-            return "{}"
-        items = []
-        for key, value in obj.items():
-            formatted_value = pretty_format_json(value, indent_level + 1)
-            if '\n' in formatted_value and not formatted_value.startswith('{') and not formatted_value.startswith('['):
-                first_line = formatted_value.split('\n')[0]
-                rest_lines = '\n'.join(formatted_value.split('\n')[1:])
-                items.append(f'{next_indent}"{key}": {first_line}\n{rest_lines}')
-            else:
-                items.append(f'{next_indent}"{key}": {formatted_value}')
-        return "{\n" + ",\n".join(items) + "\n" + indent_str + "}"
-    elif isinstance(obj, list):
-        if not obj:
-            return "[]"
-        items = []
-        for item in obj:
-            formatted_item = pretty_format_json(item, indent_level + 1)
-            items.append(f"{next_indent}{formatted_item}")
-        return "[\n" + ",\n".join(items) + "\n" + indent_str + "]"
-    elif isinstance(obj, str):
-        if '\n' in obj:
-            return obj
-        else:
-            return json.dumps(obj, ensure_ascii=False)
-    elif isinstance(obj, bool):
-        return "true" if obj else "false"
-    elif obj is None:
-        return "null"
-    else:
-        return str(obj)
+from _common import TIMESTAMP_PREFIX_RE, pretty_format_json
 
 
 def indent(text: str, level: int) -> str:
@@ -94,7 +20,6 @@ def format_timestamp(ts: int | None) -> str:
     """Format a timestamp (milliseconds) into a readable string."""
     if ts is None:
         return ""
-    import datetime
     dt = datetime.datetime.fromtimestamp(ts / 1000, tz=datetime.timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -122,16 +47,13 @@ def format_tool_use(event: dict[str, Any], index: int) -> str:
 
     lines = [header]
 
-    # Tool title
     title = state.get("title", "")
     if title:
         lines.append(indent(f"Title: {title}", 1))
 
-    # Tool input
     tool_input = state.get("input", {})
     if tool_input:
         lines.append(indent("Input:", 1))
-        # Special handling for common tools
         if tool_name == "bash" and "command" in tool_input:
             lines.append(indent(f"$ {tool_input['command']}", 2))
         elif tool_name in ("read", "write", "edit", "glob", "grep") and "file_path" in tool_input:
@@ -142,24 +64,20 @@ def format_tool_use(event: dict[str, Any], index: int) -> str:
         else:
             lines.append(indent(pretty_format_json(tool_input), 2))
 
-    # Tool output (for completed tools)
     if status == "completed":
         output = state.get("output", "")
         if output:
             lines.append(indent("Output:", 1))
-            # Truncate very long outputs
             if len(output) > 2000:
                 output = output[:2000] + "\n... [truncated]"
             lines.append(indent(output.rstrip(), 2))
 
-    # Error (for error status)
     if status == "error":
         error = state.get("error", "")
         if error:
             lines.append(indent("Error:", 1))
             lines.append(indent(error, 2))
 
-    # Timing info
     time_info = state.get("time", {})
     if time_info:
         start = time_info.get("start")
@@ -279,7 +197,6 @@ def format_event(index: int, event: dict[str, Any]) -> str:
     elif event_type == "error":
         return format_error(event, index)
     else:
-        # Unknown event type - output as JSON
         timestamp = format_timestamp(event.get("timestamp"))
         header = f"=== Event {index} | type: {event_type} ==="
         if timestamp:
@@ -287,14 +204,7 @@ def format_event(index: int, event: dict[str, Any]) -> str:
         return f"{header}\n{indent(pretty_format_json(event), 1)}"
 
 
-def main() -> None:
-    args = parse_args()
-    input_path: Path = args.input
-    if not input_path.exists():
-        raise SystemExit(f"Input file not found: {input_path}")
-
-    output_path = args.output or default_output_path(input_path)
-
+def parse(input_path: Path, output_path: Path) -> None:
     formatted_events: list[str] = []
     with input_path.open("r", encoding="utf-8") as stream:
         for line_number, raw_line in enumerate(stream, 1):
@@ -302,7 +212,6 @@ def main() -> None:
             if not stripped:
                 continue
 
-            # Strip [timestamp] prefix added by timestamp_lines.py
             ts_match = TIMESTAMP_PREFIX_RE.match(stripped)
             if ts_match:
                 stripped = stripped[ts_match.end():]
@@ -328,13 +237,4 @@ def main() -> None:
             formatted_events.append(format_event(len(formatted_events) + 1, event))
 
     output_text = "\n\n".join(formatted_events) + "\n"
-
-    if args.stdout:
-        print(output_text)
-    else:
-        output_path.write_text(output_text, encoding="utf-8")
-        print(f"Wrote parsed report to {output_path}")
-
-
-if __name__ == "__main__":
-    main()
+    output_path.write_text(output_text, encoding="utf-8")

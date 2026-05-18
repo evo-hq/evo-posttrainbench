@@ -223,7 +223,7 @@ if [ "$RUN_GPT" = true ]; then
         codex --search -a never exec --json -c model_reasoning_summary=detailed -c model_reasoning_effort=xhigh --skip-git-repo-check --yolo --model "gpt-5.4" "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_GPT"
 
     # Decode the codex JSON trace into a human-readable text report
-    python "$REPO_ROOT/agents/codex/human_readable_trace.py" "$JUDGE_OUTPUT_GPT" -o "$RESULT_DIR/judge_output_gpt5_4_rerun.txt"
+    python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent codex "$JUDGE_OUTPUT_GPT" -o "$RESULT_DIR/judge_output_gpt5_4_rerun.txt"
     echo "  GPT-5.4 judge output saved"
 
     # Save GPT-5.4 judgement JSON with model-specific suffix
@@ -278,7 +278,7 @@ OPENCODE_EOF
         opencode run --model "opencode/deepseek-v4-flash-free" --format json "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_DEEPSEEK"
 
     # Decode the opencode JSONL trace into a human-readable text report
-    python "$REPO_ROOT/agents/opencode/human_readable_trace.py" "$JUDGE_OUTPUT_DEEPSEEK" -o "$RESULT_DIR/judge_output_deepseek_rerun.txt"
+    python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent opencode "$JUDGE_OUTPUT_DEEPSEEK" -o "$RESULT_DIR/judge_output_deepseek_rerun.txt"
     echo "  DeepSeek V4 Flash Free judge output saved"
 
     # Save DeepSeek judgement JSON with model-specific suffix
@@ -318,7 +318,7 @@ if [ "$RUN_API" = true ]; then
         "${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif" \
         codex --search -a never exec --json -c model_reasoning_summary=detailed -c model_reasoning_effort=xhigh --skip-git-repo-check --yolo --model "gpt-5.4" "$JUDGE_API_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_API"
 
-    python "$REPO_ROOT/agents/codex/human_readable_trace.py" "$JUDGE_OUTPUT_API" -o "$RESULT_DIR/judge_output_api_rerun.txt"
+    python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent codex "$JUDGE_OUTPUT_API" -o "$RESULT_DIR/judge_output_api_rerun.txt"
     echo "  API judge output saved"
 
     if [ -f "$JOB_DIR/task/judgement.json" ]; then

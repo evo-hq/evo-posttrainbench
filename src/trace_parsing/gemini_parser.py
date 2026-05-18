@@ -1,97 +1,13 @@
-#!/usr/bin/env python3
 """Pretty-print Gemini CLI stream JSONL files."""
 
 from __future__ import annotations
 
-import argparse
 import json
-import re
 import shlex
 from pathlib import Path
 from typing import Any
 
-TIMESTAMP_PREFIX_RE = re.compile(r'^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] ')
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Convert a Gemini CLI --output-format stream-json .jsonl file into a "
-            "human-readable text report."
-        )
-    )
-    parser.add_argument(
-        "input",
-        type=Path,
-        help="Path to the input JSONL file produced by gemini CLI",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help=(
-            "Destination text file. Defaults to <input>.parsed.txt in the same "
-            "directory."
-        ),
-    )
-    parser.add_argument(
-        "--stdout",
-        action="store_true",
-        help="Print the parsed output to stdout instead of writing a file.",
-    )
-    return parser.parse_args()
-
-
-def default_output_path(input_path: Path) -> Path:
-    suffix = input_path.suffix or ""
-    if suffix:
-        return input_path.with_suffix(f"{suffix}.parsed.txt")
-    return input_path.with_name(f"{input_path.name}.parsed.txt")
-
-
-def pretty_format_json(obj: Any, indent_level: int = 0) -> str:
-    """Format JSON with actual newlines preserved in strings."""
-    indent_str = "  " * indent_level
-    next_indent = "  " * (indent_level + 1)
-
-    if isinstance(obj, dict):
-        if not obj:
-            return "{}"
-        items = []
-        for key, value in obj.items():
-            formatted_value = pretty_format_json(value, indent_level + 1)
-            # Handle multi-line values
-            if '\n' in formatted_value and not formatted_value.startswith('{') and not formatted_value.startswith('['):
-                # Multi-line string value - format specially
-                first_line = formatted_value.split('\n')[0]
-                rest_lines = '\n'.join(formatted_value.split('\n')[1:])
-                items.append(f'{next_indent}"{key}": {first_line}\n{rest_lines}')
-            else:
-                items.append(f'{next_indent}"{key}": {formatted_value}')
-        return "{\n" + ",\n".join(items) + "\n" + indent_str + "}"
-    elif isinstance(obj, list):
-        if not obj:
-            return "[]"
-        items = []
-        for item in obj:
-            formatted_item = pretty_format_json(item, indent_level + 1)
-            items.append(f"{next_indent}{formatted_item}")
-        return "[\n" + ",\n".join(items) + "\n" + indent_str + "]"
-    elif isinstance(obj, str):
-        # For strings with newlines, output them directly with preserved newlines
-        if '\n' in obj:
-            # Don't use JSON encoding for multi-line strings
-            # Just output the raw string with proper indenting on each line
-            return obj  # The indent() function will handle line-by-line indenting
-        else:
-            # Single-line strings use normal JSON encoding
-            return json.dumps(obj, ensure_ascii=False)
-    elif isinstance(obj, bool):
-        return "true" if obj else "false"
-    elif obj is None:
-        return "null"
-    else:
-        return str(obj)
+from _common import TIMESTAMP_PREFIX_RE, pretty_format_json
 
 
 def format_unparsable_line(index: int, line: str, error_msg: str = "") -> str:
@@ -323,7 +239,6 @@ def format_stream_event(event_type: str, data: dict[str, Any]) -> list[str]:
         if stats := data.get("stats"):
             lines.append(indent(format_stream_stats(stats), 1))
     else:
-        # Fallback to raw JSON for unrecognized event types
         lines.append(indent(pretty_format_json(data, 0), 1))
 
     return lines
@@ -378,10 +293,8 @@ def format_consolidated_deltas(
     last = deltas[-1]
     role = first.get("role", "assistant")
 
-    # Combine all content fragments
     combined_content = "".join(d.get("content", "") for d in deltas)
 
-    # Build header
     header_bits = [f"type: message (consolidated from {len(deltas)} deltas)"]
     if first_ts := first.get("timestamp"):
         last_ts = last.get("timestamp")
@@ -400,20 +313,12 @@ def format_consolidated_deltas(
     return "\n".join(lines)
 
 
-def main() -> None:
-    args = parse_args()
-    input_path: Path = args.input
-    if not input_path.exists():
-        raise SystemExit(f"Input file not found: {input_path}")
-
-    output_path = args.output or default_output_path(input_path)
-
+def parse(input_path: Path, output_path: Path) -> None:
     formatted_events: list[str] = []
     pending_deltas: list[dict[str, Any]] = []
     current_delta_role: str | None = None
 
     def flush_deltas() -> None:
-        """Flush any accumulated delta messages."""
         nonlocal pending_deltas, current_delta_role
         if pending_deltas:
             formatted_events.append(
@@ -428,7 +333,6 @@ def main() -> None:
             if not stripped:
                 continue
 
-            # Strip [timestamp] prefix added by timestamp_lines.py
             ts_match = TIMESTAMP_PREFIX_RE.match(stripped)
             if ts_match:
                 stripped = stripped[ts_match.end():]
@@ -436,7 +340,6 @@ def main() -> None:
             try:
                 event = json.loads(stripped)
             except json.JSONDecodeError as exc:
-                # Flush any pending deltas before outputting unparsable line
                 flush_deltas()
                 formatted_events.append(
                     format_unparsable_line(len(formatted_events) + 1, stripped, exc.msg)
@@ -454,30 +357,17 @@ def main() -> None:
                 )
                 continue
 
-            # Check if this is a delta message that can be consolidated
             if is_delta_message(event):
                 event_role = event.get("role", "assistant")
-                # If role changes, flush previous deltas first
                 if current_delta_role is not None and event_role != current_delta_role:
                     flush_deltas()
                 pending_deltas.append(event)
                 current_delta_role = event_role
             else:
-                # Non-delta event: flush any pending deltas first
                 flush_deltas()
                 formatted_events.append(format_event(len(formatted_events) + 1, event))
 
-    # Flush any remaining deltas at end of file
     flush_deltas()
 
     output_text = "\n\n".join(formatted_events) + "\n"
-
-    if args.stdout:
-        print(output_text)
-    else:
-        output_path.write_text(output_text, encoding="utf-8")
-        print(f"Wrote parsed report to {output_path}")
-
-
-if __name__ == "__main__":
-    main()
+    output_path.write_text(output_text, encoding="utf-8")

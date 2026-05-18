@@ -185,14 +185,8 @@ echo "=== TASK COMPLETE, PARSING AGENT TRACE ==="
 echo "============================================"
 
 # Parse agent trace into human-readable format
-TRACE_PARSER="agents/${AGENT}/human_readable_trace.py"
-if [ -f "$TRACE_PARSER" ]; then
-    python "$TRACE_PARSER" "${SOLVE_OUT}" -o "${EVAL_DIR}/solve_parsed.txt"
-    cp "${EVAL_DIR}/solve_parsed.txt" "${JOB_DIR}/solve_parsed.txt"
-else
-    echo "Warning: No trace parser found at $TRACE_PARSER, using raw output"
-    cp "${SOLVE_OUT}" "${JOB_DIR}/solve_parsed.txt"
-fi
+python src/trace_parsing/parse_trace.py --agent "${AGENT}" "${SOLVE_OUT}" -o "${EVAL_DIR}/solve_parsed.txt"
+cp "${EVAL_DIR}/solve_parsed.txt" "${JOB_DIR}/solve_parsed.txt"
 
 echo "========================================="
 echo "=== RUNNING CONTAMINATION JUDGE ==="
@@ -248,7 +242,7 @@ with_huggingface_overlay apptainer exec \
     --writable-tmpfs \
     ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif codex --search -a never exec --json -c model_reasoning_summary=detailed -c model_reasoning_effort=xhigh --skip-git-repo-check --yolo --model "gpt-5.4" "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_gpt5_4.json"
 
-python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output_gpt5_4.json" -o "${EVAL_DIR}/judge_output_gpt5_4.txt"
+python src/trace_parsing/parse_trace.py --agent codex "${EVAL_DIR}/judge_output_gpt5_4.json" -o "${EVAL_DIR}/judge_output_gpt5_4.txt"
 
 if [ -f "${JOB_DIR}/task/judgement.json" ]; then
     cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_gpt5_4.json"
@@ -296,7 +290,7 @@ with_huggingface_overlay apptainer exec \
     --writable-tmpfs \
     ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif opencode run --model "opencode/deepseek-v4-flash-free" --format json "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_deepseek.json"
 
-python agents/opencode/human_readable_trace.py "${EVAL_DIR}/judge_output_deepseek.json" -o "${EVAL_DIR}/judge_output_deepseek.txt"
+python src/trace_parsing/parse_trace.py --agent opencode "${EVAL_DIR}/judge_output_deepseek.json" -o "${EVAL_DIR}/judge_output_deepseek.txt"
 
 if [ -f "${JOB_DIR}/task/judgement.json" ]; then
     cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_deepseek.json"
@@ -327,7 +321,7 @@ with_huggingface_overlay apptainer exec \
     --writable-tmpfs \
     ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif codex --search -a never exec --json -c model_reasoning_summary=detailed -c model_reasoning_effort=xhigh --skip-git-repo-check --yolo --model "gpt-5.4" "$JUDGE_API_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_api.json"
 
-python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output_api.json" -o "${EVAL_DIR}/judge_output_api.txt"
+python src/trace_parsing/parse_trace.py --agent codex "${EVAL_DIR}/judge_output_api.json" -o "${EVAL_DIR}/judge_output_api.txt"
 
 if [ -f "${JOB_DIR}/task/judgement.json" ]; then
     cp "${JOB_DIR}/task/judgement.json" "${EVAL_DIR}/judgement_api.json"

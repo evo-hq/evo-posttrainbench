@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Pretty-print Codex CLI stream JSON files.
 
 Auto-detects format: if one of the first 200 lines starts with
@@ -8,54 +7,16 @@ otherwise the file is copied verbatim.
 
 from __future__ import annotations
 
-import argparse
 import json
-import re
 import shlex
 import shutil
 from pathlib import Path
 from typing import Any
 
-TIMESTAMP_PREFIX_RE = re.compile(r'^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] ')
+from _common import TIMESTAMP_PREFIX_RE, pretty_format_json
 
 DETECT_LINES = 200
 DETECT_PREFIX = '{"type":"thread.started"'
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Convert a Codex CLI --json output file into a human-readable text report. "
-            "Auto-detects structured JSON vs plain text."
-        )
-    )
-    parser.add_argument(
-        "input",
-        type=Path,
-        help="Path to the input JSONL file produced by codex CLI",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help=(
-            "Destination text file. Defaults to <input>.parsed.txt in the same "
-            "directory."
-        ),
-    )
-    parser.add_argument(
-        "--stdout",
-        action="store_true",
-        help="Print the parsed output to stdout instead of writing a file.",
-    )
-    return parser.parse_args()
-
-
-def default_output_path(input_path: Path) -> Path:
-    suffix = input_path.suffix or ""
-    if suffix:
-        return input_path.with_suffix(f"{suffix}.parsed.txt")
-    return input_path.with_name(f"{input_path.name}.parsed.txt")
 
 
 def is_structured_json(input_path: Path) -> bool:
@@ -65,68 +26,12 @@ def is_structured_json(input_path: Path) -> bool:
             if i >= DETECT_LINES:
                 break
             stripped = line.lstrip()
-            # Strip [timestamp] prefix if present
             ts_match = TIMESTAMP_PREFIX_RE.match(stripped)
             if ts_match:
                 stripped = stripped[ts_match.end():]
             if stripped.startswith(DETECT_PREFIX):
                 return True
     return False
-
-
-def copy_file(input_path: Path, args: argparse.Namespace) -> None:
-    """Copy the input file verbatim to the output."""
-    if args.stdout:
-        print(input_path.read_text(encoding="utf-8"))
-        return
-
-    output_path = args.output or default_output_path(input_path)
-    with input_path.open("rb") as src, output_path.open("wb") as dst:
-        shutil.copyfileobj(src, dst)
-    print(f"Wrote copied file to {output_path}")
-
-
-def pretty_format_json(obj: Any, indent_level: int = 0) -> str:
-    """Format JSON with actual newlines preserved in strings."""
-    indent_str = "  " * indent_level
-    next_indent = "  " * (indent_level + 1)
-
-    if isinstance(obj, dict):
-        if not obj:
-            return "{}"
-        items = []
-        for key, value in obj.items():
-            formatted_value = pretty_format_json(value, indent_level + 1)
-            if (
-                "\n" in formatted_value
-                and not formatted_value.startswith("{")
-                and not formatted_value.startswith("[")
-            ):
-                first_line = formatted_value.split("\n")[0]
-                rest_lines = "\n".join(formatted_value.split("\n")[1:])
-                items.append(f'{next_indent}"{key}": {first_line}\n{rest_lines}')
-            else:
-                items.append(f'{next_indent}"{key}": {formatted_value}')
-        return "{\n" + ",\n".join(items) + "\n" + indent_str + "}"
-    elif isinstance(obj, list):
-        if not obj:
-            return "[]"
-        items = []
-        for item in obj:
-            formatted_item = pretty_format_json(item, indent_level + 1)
-            items.append(f"{next_indent}{formatted_item}")
-        return "[\n" + ",\n".join(items) + "\n" + indent_str + "]"
-    elif isinstance(obj, str):
-        if "\n" in obj:
-            return obj
-        else:
-            return json.dumps(obj, ensure_ascii=False)
-    elif isinstance(obj, bool):
-        return "true" if obj else "false"
-    elif obj is None:
-        return "null"
-    else:
-        return str(obj)
 
 
 def indent(text: str, level: int) -> str:
@@ -139,7 +44,6 @@ def format_unparsable_line(index: int, line: str, error_msg: str = "") -> str:
 
 
 def format_command(command: list[str] | str) -> str:
-    """Format a command for display."""
     if isinstance(command, list):
         return " ".join(shlex.quote(str(token)) for token in command)
     return str(command)
@@ -149,13 +53,11 @@ CODEX_ITEM_EVENT_TYPES = {"item.completed", "item.started", "item.updated"}
 
 
 def format_event(index: int, data: dict[str, Any], wall_ts: str | None = None) -> str:
-    """Format a Codex event for display."""
     # Codex CLI uses two event formats:
     #   1. Old format: {"id": "...", "msg": {"type": "agent_message", ...}}
     #   2. New (Codex) format: {"type": "item.completed", "item": {"type": "command_execution", ...}}
     event_type = data.get("type", "unknown")
 
-    # Handle Codex item-based events
     if event_type in CODEX_ITEM_EVENT_TYPES:
         item = data.get("item", {})
         item_type = item.get("type", "unknown")
@@ -168,7 +70,6 @@ def format_event(index: int, data: dict[str, Any], wall_ts: str | None = None) -
         lines.extend(format_codex_item_event(data))
         return "\n".join(lines)
 
-    # Handle other Codex top-level events
     if event_type == "thread.started":
         lines = [f"=== Event {index} | type: {event_type} ==="]
         lines.extend(format_codex_thread_started(data))
@@ -179,7 +80,6 @@ def format_event(index: int, data: dict[str, Any], wall_ts: str | None = None) -
         lines.extend(format_codex_turn_event(data))
         return "\n".join(lines)
 
-    # Old format: msg-based events
     msg = data.get("msg", data)
     event_id = data.get("id", "")
     msg_type = msg.get("type", "unknown")
@@ -487,7 +387,6 @@ def format_codex_item_event(data: dict[str, Any]) -> list[str]:
     item = data.get("item", {})
     item_type = item.get("type", "unknown")
 
-    # command_execution needs the status label from the wrapper
     if item_type == "command_execution":
         return format_codex_command_execution(item)
 
@@ -495,7 +394,6 @@ def format_codex_item_event(data: dict[str, Any]) -> list[str]:
     if handler:
         return handler(item)
 
-    # Fallback: dump the item contents
     filtered = {k: v for k, v in item.items() if k != "type"}
     if filtered:
         return [indent(pretty_format_json(filtered, 0), 1)]
@@ -519,7 +417,6 @@ def format_codex_turn_event(msg: dict[str, Any]) -> list[str]:
 
 
 def format_unknown_event(msg: dict[str, Any]) -> list[str]:
-    # Filter out the type field for cleaner output
     filtered = {k: v for k, v in msg.items() if k != "type"}
     if filtered:
         return [indent(pretty_format_json(filtered, 0), 1)]
@@ -567,7 +464,6 @@ def format_consolidated_deltas(index: int, deltas: list[dict[str, Any]], delta_t
     if not deltas:
         return ""
 
-    # Combine all delta content
     combined_content = ""
     for d in deltas:
         msg = d.get("msg", d)
@@ -576,7 +472,6 @@ def format_consolidated_deltas(index: int, deltas: list[dict[str, Any]], delta_t
         elif chunk := msg.get("text"):
             combined_content += chunk
 
-    # Build header
     type_label = delta_type.replace("_delta", "").replace("_", " ")
     header = f"=== Event {index} | type: {delta_type} (consolidated from {len(deltas)} deltas) ==="
     lines = [header]
@@ -588,17 +483,10 @@ def format_consolidated_deltas(index: int, deltas: list[dict[str, Any]], delta_t
     return "\n".join(lines)
 
 
-def main() -> None:
-    args = parse_args()
-    input_path: Path = args.input
-    if not input_path.exists():
-        raise SystemExit(f"Input file not found: {input_path}")
-
+def parse(input_path: Path, output_path: Path) -> None:
     if not is_structured_json(input_path):
-        copy_file(input_path, args)
+        shutil.copyfile(input_path, output_path)
         return
-
-    output_path = args.output or default_output_path(input_path)
 
     formatted_events: list[str] = []
     pending_deltas: list[dict[str, Any]] = []
@@ -621,7 +509,6 @@ def main() -> None:
             if not stripped:
                 continue
 
-            # Strip [timestamp] prefix added by timestamp_lines.py
             wall_ts = None
             ts_match = TIMESTAMP_PREFIX_RE.match(stripped)
             if ts_match:
@@ -632,9 +519,7 @@ def main() -> None:
                 event = json.loads(stripped)
             except json.JSONDecodeError as exc:
                 flush_deltas()
-                formatted_events.append(
-                    format_unparsable_line(0, stripped, exc.msg)
-                )
+                formatted_events.append(format_unparsable_line(0, stripped, exc.msg))
                 continue
 
             if not isinstance(event, dict):
@@ -646,7 +531,6 @@ def main() -> None:
 
             is_delta, delta_type = is_delta_event(event)
             if is_delta:
-                # If delta type changes, flush previous deltas first
                 if current_delta_type is not None and delta_type != current_delta_type:
                     flush_deltas()
                 pending_deltas.append(event)
@@ -659,13 +543,4 @@ def main() -> None:
     flush_deltas()
 
     output_text = "\n\n".join(formatted_events) + "\n"
-
-    if args.stdout:
-        print(output_text)
-    else:
-        output_path.write_text(output_text, encoding="utf-8")
-        print(f"Wrote parsed report to {output_path}")
-
-
-if __name__ == "__main__":
-    main()
+    output_path.write_text(output_text, encoding="utf-8")

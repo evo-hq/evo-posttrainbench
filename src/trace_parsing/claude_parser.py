@@ -1,94 +1,17 @@
-#!/usr/bin/env python3
 """Format Claude Code stream-json output into a readable transcript."""
 
 from __future__ import annotations
 
-import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-TIMESTAMP_PREFIX_RE = re.compile(r'^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\] ')
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Convert Claude Code --output-format stream-json logs into a human-readable transcript."
-        )
-    )
-    parser.add_argument(
-        "input_path",
-        help="Path to the stream-json .jsonl file (use '-' for stdin)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        help="Optional output path (defaults to stdout)",
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=0,
-        help="Maximum line width for wrapping text blocks (0 to disable wrapping).",
-    )
-    parser.add_argument(
-        "--include-raw",
-        action="store_true",
-        help="Append any unhandled events as raw JSON for debugging.",
-    )
-    return parser.parse_args()
-
-
-def pretty_format_json(obj: Any, indent_level: int = 0) -> str:
-    """Format JSON with actual newlines preserved in strings."""
-    indent_str = "  " * indent_level
-    next_indent = "  " * (indent_level + 1)
-
-    if isinstance(obj, dict):
-        if not obj:
-            return "{}"
-        items = []
-        for key, value in obj.items():
-            formatted_value = pretty_format_json(value, indent_level + 1)
-            # Handle multi-line values
-            if '\n' in formatted_value and not formatted_value.startswith('{') and not formatted_value.startswith('['):
-                # Multi-line string value - format specially
-                first_line = formatted_value.split('\n')[0]
-                rest_lines = '\n'.join(formatted_value.split('\n')[1:])
-                items.append(f'{next_indent}"{key}": {first_line}\n{rest_lines}')
-            else:
-                items.append(f'{next_indent}"{key}": {formatted_value}')
-        return "{\n" + ",\n".join(items) + "\n" + indent_str + "}"
-    elif isinstance(obj, list):
-        if not obj:
-            return "[]"
-        items = []
-        for item in obj:
-            formatted_item = pretty_format_json(item, indent_level + 1)
-            items.append(f"{next_indent}{formatted_item}")
-        return "[\n" + ",\n".join(items) + "\n" + indent_str + "]"
-    elif isinstance(obj, str):
-        # For strings with newlines, output them directly with preserved newlines
-        if '\n' in obj:
-            # Don't use JSON encoding for multi-line strings
-            # Just output the raw string with proper indenting on each line
-            return obj  # The indent_block() function will handle line-by-line indenting
-        else:
-            # Single-line strings use normal JSON encoding
-            return json.dumps(obj, ensure_ascii=False)
-    elif isinstance(obj, bool):
-        return "true" if obj else "false"
-    elif obj is None:
-        return "null"
-    else:
-        return str(obj)
+from _common import TIMESTAMP_PREFIX_RE, pretty_format_json
 
 
 class TranscriptFormatter:
-    def __init__(self, width: int, include_raw: bool = False) -> None:
+    def __init__(self, width: int = 0, include_raw: bool = False) -> None:
         self.width = width
         self.include_raw = include_raw
         self.lines: List[str] = []
@@ -161,7 +84,6 @@ class TranscriptFormatter:
             if block_type == "text":
                 text = block.get("text", "")
                 if text:
-                    # Text already has real newlines from json.loads()
                     self.lines.append(indent_block(text, indent="  ", width=self.width))
             elif block_type == "tool_use":
                 self._handle_tool_use(block)
@@ -189,7 +111,6 @@ class TranscriptFormatter:
         tool_name = self.tool_call_meta.get(tool_id, {}).get("name", "tool")
         self.lines.append(f"  Tool result — {tool_name} ({tool_id})")
         formatted_result = format_tool_result(block)
-        # Text already has real newlines from json.loads()
         self.lines.append(indent_block(formatted_result, indent="    ", width=self.width))
 
     def _handle_unknown(self, event: Dict[str, Any], line_no: int) -> None:
@@ -248,7 +169,6 @@ def format_tool_input(payload: Any) -> str:
         command = payload.get("command") or payload.get("code")
         if isinstance(command, str) and len(payload) <= 2:
             prefix = "$" if "command" in payload else "python"
-            # Command already has real newlines from json.loads()
             return f"{prefix} {command.strip()}" if command.strip() else prefix
     return json_dumps_clean(payload)
 
@@ -275,51 +195,32 @@ def format_tool_result(block: Dict[str, Any]) -> str:
     return json_dumps_clean(block)
 
 
-def load_events(path: str) -> Iterable[Tuple[int, Dict[str, Any]]]:
-    if path == "-":
-        lines_iter = enumerate(sys.stdin, 1)
-    else:
-        file_path = Path(path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"Input file not found: {file_path}")
-        lines_iter = enumerate(file_path.open("r", encoding="utf-8"), 1)
+def load_events(path: Path) -> Iterable[Tuple[int, Dict[str, Any]]]:
+    with path.open("r", encoding="utf-8") as stream:
+        for line_no, raw in enumerate(stream, 1):
+            stripped = raw.strip()
+            if not stripped:
+                continue
 
-    for line_no, raw in lines_iter:
-        stripped = raw.strip()
-        if not stripped:
-            continue
+            wall_ts = None
+            ts_match = TIMESTAMP_PREFIX_RE.match(stripped)
+            if ts_match:
+                wall_ts = ts_match.group(1)
+                stripped = stripped[ts_match.end():]
 
-        # Strip [timestamp] prefix added by timestamp_lines.py
-        wall_ts = None
-        ts_match = TIMESTAMP_PREFIX_RE.match(stripped)
-        if ts_match:
-            wall_ts = ts_match.group(1)
-            stripped = stripped[ts_match.end():]
-
-        try:
-            event = json.loads(stripped)
-            if wall_ts:
-                event['_wall_ts'] = wall_ts
-            yield line_no, event
-        except json.JSONDecodeError as exc:
-            # Output unparsable lines
-            print(f"NOT PARSABLE (line {line_no}): {exc}", file=sys.stderr)
-            print(f"  Raw line: {stripped}", file=sys.stderr)
-            continue
+            try:
+                event = json.loads(stripped)
+                if wall_ts:
+                    event['_wall_ts'] = wall_ts
+                yield line_no, event
+            except json.JSONDecodeError as exc:
+                print(f"NOT PARSABLE (line {line_no}): {exc}", file=sys.stderr)
+                print(f"  Raw line: {stripped}", file=sys.stderr)
+                continue
 
 
-def main() -> None:
-    args = parse_args()
-    formatter = TranscriptFormatter(width=args.width, include_raw=args.include_raw)
-    events = list(load_events(args.input_path))
+def parse(input_path: Path, output_path: Path) -> None:
+    formatter = TranscriptFormatter()
+    events = list(load_events(input_path))
     formatter.process_events(events)
-    output_text = formatter.render()
-
-    if args.output:
-        Path(args.output).write_text(output_text, encoding="utf-8")
-    else:
-        sys.stdout.write(output_text)
-
-
-if __name__ == "__main__":
-    main()
+    output_path.write_text(formatter.render(), encoding="utf-8")
