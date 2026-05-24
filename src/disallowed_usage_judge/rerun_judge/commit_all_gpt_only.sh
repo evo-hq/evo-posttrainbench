@@ -44,7 +44,7 @@ if [ -z "$POST_TRAIN_BENCH_RESULTS_DIR" ]; then
     exit 1
 fi
 
-RESULT_DIRS=$(python "$SCRIPT_DIR/list_results.py" --paths-only --latest-only)
+RESULT_DIRS=$(python3 "$SCRIPT_DIR/list_results.py" --paths-only --latest-only)
 if [ -z "$RESULT_DIRS" ]; then
     echo "No result directories found under $POST_TRAIN_BENCH_RESULTS_DIR"
     exit 0
@@ -75,8 +75,8 @@ while read -r result_dir; do
         TOTAL_SUBMITTED=$((TOTAL_SUBMITTED + 1))
         continue
     fi
-
-    SUBMIT_OUT=$(condor_submit_bid 35 -a "result_dir=$result_dir" "$SUB_FILE" 2>&1)
+    sleep 4
+    SUBMIT_OUT=$(condor_submit_bid 100 -a "result_dir=$result_dir" "$SUB_FILE" 2>&1)
     echo "$SUBMIT_OUT" | tail -2
     CLUSTER_ID=$(echo "$SUBMIT_OUT" | grep -oE 'cluster [0-9]+' | awk '{print $2}' | tail -1)
     if [ -n "$CLUSTER_ID" ]; then
