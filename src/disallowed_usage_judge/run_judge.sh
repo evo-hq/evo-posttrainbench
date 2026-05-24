@@ -18,7 +18,7 @@
 # All outputs are always saved with the _rerun suffix so original judge
 # outputs produced by src/run_task.sh are preserved.
 #
-# Usage: run_judge.sh [--gpt-only|--kimi-only|--api-only] <result_dir>
+# Usage: run_judge.sh [--gpt-only|--kimi-only|--api-only|--gpt-contamination-only|--kimi-contamination-only] <result_dir>
 #
 # Options:
 #   --gpt-only      Only rerun the GPT-5.4 contamination judge + the API judge
@@ -29,6 +29,16 @@
 #                   the existing GPT _rerun output if present.
 #   --api-only      Only rerun the GPT-5.4 third-party API usage judge
 #                   (skip both contamination judges and skip aggregation).
+#   --gpt-contamination-only
+#                   Only rerun the GPT-5.4 contamination judge
+#                   (skip Kimi and API). Aggregation is also skipped, so
+#                   judge_result_rerun.json is not (re)written; only
+#                   judgement_gpt5_4_rerun.json is produced.
+#   --kimi-contamination-only
+#                   Only rerun the Kimi K2.6 contamination judge
+#                   (skip GPT and API). Aggregation is also skipped, so
+#                   judge_result_rerun.json is not (re)written; only
+#                   judgement_kimi_rerun.json is produced.
 
 set -e
 
@@ -36,6 +46,7 @@ set -e
 RUN_GPT=true
 RUN_KIMI=true
 RUN_API=true
+RUN_AGGREGATE=true
 MODE="all"
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -56,6 +67,20 @@ while [[ $# -gt 0 ]]; do
             RUN_KIMI=false
             shift
             ;;
+        --gpt-contamination-only)
+            MODE="gpt-contamination-only"
+            RUN_KIMI=false
+            RUN_API=false
+            RUN_AGGREGATE=false
+            shift
+            ;;
+        --kimi-contamination-only)
+            MODE="kimi-contamination-only"
+            RUN_GPT=false
+            RUN_API=false
+            RUN_AGGREGATE=false
+            shift
+            ;;
         *)
             RESULT_DIR="$1"
             shift
@@ -64,7 +89,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$RESULT_DIR" ]; then
-    echo "Usage: $0 [--gpt-only|--kimi-only|--api-only] <result_dir>" >&2
+    echo "Usage: $0 [--gpt-only|--kimi-only|--api-only|--gpt-contamination-only|--kimi-contamination-only] <result_dir>" >&2
     exit 1
 fi
 
@@ -104,10 +129,12 @@ MODEL_HF=$(echo "$MODEL_PART" | sed 's/_/\//')
 echo "Running judge on: $RESULT_DIR"
 echo "  Benchmark: $BENCHMARK | Model: $MODEL_HF | Trace: $TRACE_NAME"
 case "$MODE" in
-    all)       echo "  Mode: all judges (GPT-5.4 contamination + Kimi K2.6 contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
-    gpt-only)  echo "  Mode: GPT-5.4 contamination + GPT-5.4 API (Kimi skipped), outputs suffixed with _rerun" ;;
-    kimi-only) echo "  Mode: Kimi K2.6 contamination only (GPT-based judges skipped), outputs suffixed with _rerun" ;;
-    api-only)  echo "  Mode: GPT-5.4 API only (contamination judges skipped), outputs suffixed with _rerun" ;;
+    all)                     echo "  Mode: all judges (GPT-5.4 contamination + Kimi K2.6 contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
+    gpt-only)                echo "  Mode: GPT-5.4 contamination + GPT-5.4 API (Kimi skipped), outputs suffixed with _rerun" ;;
+    kimi-only)               echo "  Mode: Kimi K2.6 contamination only (GPT-based judges skipped), outputs suffixed with _rerun" ;;
+    api-only)                echo "  Mode: GPT-5.4 API only (contamination judges skipped), outputs suffixed with _rerun" ;;
+    gpt-contamination-only)  echo "  Mode: GPT-5.4 contamination only (Kimi + API skipped, no aggregation), outputs suffixed with _rerun" ;;
+    kimi-contamination-only) echo "  Mode: Kimi K2.6 contamination only (GPT + API skipped, no aggregation), outputs suffixed with _rerun" ;;
 esac
 
 # Generate judge prompts
@@ -335,17 +362,20 @@ fi
 # Always re-aggregate so judge_result_rerun.json reflects the latest run.
 # All three per-judge rerun files must exist; aggregate_judgement.py fails
 # loud if any is missing.
+# Skipped in gpt-contamination-only mode (only one judge ran).
 # ============================================================
-echo ""
-echo "========================================="
-echo "=== Aggregating Judge Results ==="
-echo "========================================="
+if [ "$RUN_AGGREGATE" = true ]; then
+    echo ""
+    echo "========================================="
+    echo "=== Aggregating Judge Results ==="
+    echo "========================================="
 
-python "$SCRIPT_DIR/aggregate_judgement.py" \
-    --judge "gpt5_4=$RESULT_DIR/judgement_gpt5_4_rerun.json" \
-    --judge "kimi=$RESULT_DIR/judgement_kimi_rerun.json" \
-    --judge "api=$RESULT_DIR/judgement_api_rerun.json" \
-    --output "$RESULT_DIR/judge_result_rerun.json"
+    python "$SCRIPT_DIR/aggregate_judgement.py" \
+        --judge "gpt5_4=$RESULT_DIR/judgement_gpt5_4_rerun.json" \
+        --judge "kimi=$RESULT_DIR/judgement_kimi_rerun.json" \
+        --judge "api=$RESULT_DIR/judgement_api_rerun.json" \
+        --output "$RESULT_DIR/judge_result_rerun.json"
+fi
 
 echo ""
 echo "Judge completed successfully (mode: $MODE)"
