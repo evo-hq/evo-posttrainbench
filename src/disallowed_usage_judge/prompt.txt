@@ -42,6 +42,7 @@ In difficult cases, run `python ../contamination_check.py --reference ../test_da
 - Downloading models for viewing or for inference / testing.
 - Fine-tuning `{model}`.
 - Fine-tuning a derivative of `{model}` that the agent themselves produced by fine-tuning `{model}` (chained fine-tunes are fine).
+- Storing the raw base `{model}` itself as `final_model`. The agent is not required to fine-tune; submitting the unchanged base model shouldn't be flagged.
 
 **Disallowed**
 Let M be a model which is not a derivative of `{model}` produced by the agent. For example, M could be an instruction-tuned version of `{model}` that the agent downloaded. For such M:
