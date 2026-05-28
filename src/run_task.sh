@@ -254,33 +254,58 @@ rm -f "${JOB_DIR}/task/judgement.json"
 # ---- Judge 2: Kimi K2.6 via opencode CLI ----
 echo "=== Judge 2: Kimi K2.6 (opencode CLI) ==="
 
-if [ -z "${OPENCODE_API_KEY:-}" ]; then
-    echo "ERROR: OPENCODE_API_KEY is not set — Kimi K2.6 judge needs an opencode API key" >&2
+# Prefer OPENCODE_API_KEY when set, fall back to OPENROUTER_API_KEY.
+if [ -n "${OPENCODE_API_KEY:-}" ]; then
+    KIMI_PROVIDER="opencode"
+    KIMI_API_KEY="$OPENCODE_API_KEY"
+    KIMI_MODEL="opencode/kimi-k2.6"
+elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    KIMI_PROVIDER="openrouter"
+    KIMI_API_KEY="$OPENROUTER_API_KEY"
+    KIMI_MODEL="openrouter/moonshotai/kimi-k2.6"
+else
+    echo "ERROR: neither OPENCODE_API_KEY nor OPENROUTER_API_KEY is set — Kimi K2.6 judge needs one" >&2
     exit 1
 fi
 
 # opencode requires opencode.json in the working directory for provider
-# config and auto-approval. Write it into the task pwd that apptainer uses.
-cat > "${JOB_DIR}/task/opencode.json" << 'OPENCODE_EOF'
+# config and auto-approval. Bake the API key directly into the config so we
+# do not need to pass any key env vars into the apptainer sandbox.
+if [ "$KIMI_PROVIDER" = "openrouter" ]; then
+    OPENROUTER_MODEL_PIN=$(cat <<JSON
+,
+      "models": {
+        "moonshotai/kimi-k2.6": {
+          "options": {
+            "provider": { "order": ["Cloudflare"], "allow_fallbacks": false }
+          }
+        }
+      }
+JSON
+)
+else
+    OPENROUTER_MODEL_PIN=""
+fi
+
+cat > "${JOB_DIR}/task/opencode.json" <<EOF
 {
-  "$schema": "https://opencode.ai/config.json",
+  "\$schema": "https://opencode.ai/config.json",
   "permission": "allow",
   "provider": {
-    "opencode": {
+    "${KIMI_PROVIDER}": {
       "options": {
-        "apiKey": "{env:OPENCODE_API_KEY}"
-      }
+        "apiKey": "${KIMI_API_KEY}"
+      }${OPENROUTER_MODEL_PIN}
     }
   }
 }
-OPENCODE_EOF
+EOF
 
 with_huggingface_overlay apptainer exec \
     --nv \
     --containall \
     --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
     --env HF_HOME="${HF_HOME_NEW}" \
-    --env OPENCODE_API_KEY="${OPENCODE_API_KEY}" \
     --env VLLM_API_KEY="inspectai" \
     --env PYTHONNOUSERSITE="1" \
     --bind "${JOB_TMP}:/tmp" \
@@ -288,7 +313,7 @@ with_huggingface_overlay apptainer exec \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \
-    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif opencode run --model "opencode/kimi-k2.6" --format json "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_kimi.json"
+    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif opencode run --model "$KIMI_MODEL" --format json "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output_kimi.json"
 
 python src/trace_parsing/parse_trace.py --agent opencode "${EVAL_DIR}/judge_output_kimi.json" -o "${EVAL_DIR}/judge_output_kimi.txt"
 

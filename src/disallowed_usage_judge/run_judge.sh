@@ -202,11 +202,11 @@ if [ "$RUN_GPT" = true ] || [ "$RUN_API" = true ]; then
     fi
 fi
 
-# Ensure OPENCODE_API_KEY is available when the Kimi judge runs. opencode
-# reads it via {env:OPENCODE_API_KEY} from opencode.json (see solve.sh).
+# The Kimi judge needs either an opencode-hosted key or an OpenRouter key.
+# opencode picks them up from opencode.json (see solve.sh / Judge 2 block).
 if [ "$RUN_KIMI" = true ]; then
-    if [ -z "${OPENCODE_API_KEY:-}" ]; then
-        echo "ERROR: OPENCODE_API_KEY is not set — Kimi K2.6 judge needs an opencode API key" >&2
+    if [ -z "${OPENCODE_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
+        echo "ERROR: neither OPENCODE_API_KEY nor OPENROUTER_API_KEY is set — Kimi K2.6 judge needs one" >&2
         exit 1
     fi
 fi
@@ -275,34 +275,63 @@ if [ "$RUN_KIMI" = true ]; then
     echo "=== Judge 2: Kimi K2.6 (opencode CLI) ==="
     echo "========================================="
 
+    # Prefer OPENCODE_API_KEY when set, fall back to OPENROUTER_API_KEY.
+    if [ -n "${OPENCODE_API_KEY:-}" ]; then
+        KIMI_PROVIDER="opencode"
+        KIMI_API_KEY="$OPENCODE_API_KEY"
+        KIMI_MODEL="opencode/kimi-k2.6"
+    else
+        KIMI_PROVIDER="openrouter"
+        KIMI_API_KEY="$OPENROUTER_API_KEY"
+        KIMI_MODEL="openrouter/moonshotai/kimi-k2.6"
+    fi
+
     # opencode requires opencode.json in the working directory for provider
-    # config and auto-approval. Write it into the task pwd that apptainer uses.
-    cat > "$JOB_DIR/task/opencode.json" << 'OPENCODE_EOF'
+    # config and auto-approval. Bake the API key directly into the config so
+    # we do not need to pass any key env vars into the apptainer sandbox.
+    # When routing via OpenRouter, pin the upstream to Cloudflare so the
+    # judge always uses the same backend regardless of OpenRouter's defaults.
+    if [ "$KIMI_PROVIDER" = "openrouter" ]; then
+        OPENROUTER_MODEL_PIN=$(cat <<JSON
+,
+      "models": {
+        "moonshotai/kimi-k2.6": {
+          "options": {
+            "provider": { "order": ["Cloudflare"], "allow_fallbacks": false }
+          }
+        }
+      }
+JSON
+)
+    else
+        OPENROUTER_MODEL_PIN=""
+    fi
+
+    cat > "$JOB_DIR/task/opencode.json" <<EOF
 {
-  "$schema": "https://opencode.ai/config.json",
+  "\$schema": "https://opencode.ai/config.json",
   "permission": "allow",
   "provider": {
-    "opencode": {
+    "${KIMI_PROVIDER}": {
       "options": {
-        "apiKey": "{env:OPENCODE_API_KEY}"
-      }
+        "apiKey": "${KIMI_API_KEY}"
+      }${OPENROUTER_MODEL_PIN}
     }
   }
 }
-OPENCODE_EOF
+EOF
 
     JUDGE_OUTPUT_KIMI="$RESULT_DIR/judge_output_kimi_rerun.json"
     apptainer exec \
         --containall \
         --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
-        --env OPENCODE_API_KEY="${OPENCODE_API_KEY}" \
         --env PYTHONNOUSERSITE="1" \
         --bind "${JOB_TMP}:/tmp" \
         --home "${JOB_DIR}:/home/ben" \
         --pwd "/home/ben/task" \
         --writable-tmpfs \
         "${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif" \
-        opencode run --model "opencode/kimi-k2.6" --format json "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_KIMI"
+        opencode run --model "$KIMI_MODEL" --format json "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_KIMI"
 
     # Decode the opencode JSONL trace into a human-readable text report
     python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent opencode "$JUDGE_OUTPUT_KIMI" -o "$RESULT_DIR/judge_output_kimi_rerun.txt"
