@@ -22,6 +22,7 @@ Usage:
 """
 import argparse
 import csv
+import glob
 import os
 
 from utils import (
@@ -84,19 +85,28 @@ def collect_method(
 
             run_dir = latest_runs[key]["path"]
 
-            metrics_path = os.path.join(run_dir, "metrics.json")
-            if not os.path.exists(metrics_path):
-                print(f"WARNING: metrics.json not found: {metrics_path}")
+            try:
+                metrics_grid[model][bench] = load_metrics(
+                    os.path.join(run_dir, "metrics.json")
+                )
+                judge_result = load_judge_result(run_dir)
+                contamination_grid[model][bench] = judge_result_to_cell(
+                    judge_result
+                )
+                _, seconds = load_time_taken(run_dir)
+                time_total_seconds += seconds
+                time_valid_count += 1
+            except (FileNotFoundError, ValueError, KeyError, TypeError) as e:
+                # Broken run directory (missing/malformed metrics, judgement,
+                # or time file). Fall through to baseline fallback. Skip the
+                # warning when a final_eval_9.txt-style file exists — the
+                # eval exhausted its retries, so a missing metrics.json is
+                # expected. Matches both `final_eval_9.txt` and the rerun
+                # naming `*_final_eval_9.txt` (e.g. `z_new_<id>_final_eval_9.txt`).
+                if not glob.glob(os.path.join(run_dir, "*final_eval_9.txt")):
+                    print(f"WARNING: skipping broken run {run_dir}: {e}")
                 metrics_grid[model][bench] = ""
-            else:
-                metrics_grid[model][bench] = load_metrics(metrics_path)
-
-            judge_result = load_judge_result(run_dir)
-            contamination_grid[model][bench] = judge_result_to_cell(judge_result)
-
-            _, seconds = load_time_taken(run_dir)
-            time_total_seconds += seconds
-            time_valid_count += 1
+                contamination_grid[model][bench] = ""
 
     # Write contamination CSV
     contamination_path = os.path.join(
