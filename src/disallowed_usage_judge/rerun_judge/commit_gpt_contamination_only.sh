@@ -90,7 +90,7 @@ while read -r result_dir; do
         TOTAL_SUBMITTED=$((TOTAL_SUBMITTED + 1))
         continue
     fi
-    sleep 4
+    sleep 1
     SUBMIT_OUT=$(condor_submit_bid 100 -a "result_dir=$result_dir" "$SUB_FILE" 2>&1)
     echo "$SUBMIT_OUT" | tail -2
     CLUSTER_ID=$(echo "$SUBMIT_OUT" | grep -oE 'cluster [0-9]+' | awk '{print $2}' | tail -1)
