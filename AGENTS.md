@@ -19,7 +19,7 @@ PostTrainBench/
 ├── src/
 │   ├── baselines/             # Baseline score computation
 │   ├── commit_utils/          # HTCondor job submission utilities (incl. set_env_vars.sh)
-│   ├── disallowed_usage_judge/ # Contamination + disallowed-API judges (3 judges; see Safety)
+│   ├── disallowed_usage_judge/ # Contamination + disallowed-API judges (2 judges; see Safety)
 │   ├── eval/
 │   │   ├── general/           # Prompt generation (get_prompt.py, prompt.txt)
 │   │   ├── tasks/             # Evaluation benchmarks (aime2025, aime2026, gsm8k, ...)
@@ -34,7 +34,7 @@ PostTrainBench/
 
 | File | Purpose |
 |------|---------|
-| `src/run_task.sh` | Main task execution orchestrator (runs agent, then 3 judges, then evaluation) |
+| `src/run_task.sh` | Main task execution orchestrator (runs agent, then 2 judges, then evaluation) |
 | `src/commit_utils/commit.sh` | Batch job submission across agents × benchmarks × models |
 | `src/commit_utils/set_env_vars.sh` | Sources `.env` and exports `POST_TRAIN_BENCH_*` env vars |
 | `src/commit_utils/single_task.sub` | HTCondor submission template |
@@ -42,7 +42,7 @@ PostTrainBench/
 | `src/eval/general/get_prompt.py` | Generates agent prompts |
 | `src/eval/general/prompt.txt` | Agent prompt template |
 | `src/trace_parsing/parse_trace.py` | Dispatches to per-agent parser to produce human-readable trace |
-| `src/disallowed_usage_judge/run_judge.sh` | Runs all 3 judges (GPT-5.4 contamination, Kimi K2.6 contamination, GPT-5.4 API) and aggregates |
+| `src/disallowed_usage_judge/run_judge.sh` | Runs both judges (GPT-5.4 contamination, GPT-5.4 API) and aggregates |
 | `src/disallowed_usage_judge/get_judge_prompt.py` | Generates judge prompts (`--kind api` for API judge) |
 | `src/disallowed_usage_judge/aggregate_judgement.py` | Aggregates per-judge JSONs into `judge_result.json` |
 | `containers/standard.def` | Main container definition (other `.def` files exist per-agent) |
@@ -122,16 +122,13 @@ condor_submit_bid 100 \
 
 ## Safety Mechanisms
 
-The project includes contamination detection via three agent-as-judge runs invoked by
+The project includes contamination detection via two agent-as-judge runs invoked by
 `src/run_task.sh` after the agent finishes (also exposed standalone via
 `src/disallowed_usage_judge/run_judge.sh`):
 
 1. **GPT-5.4 contamination judge** (codex CLI, subscription auth) — checks for test-data usage,
    eval tampering, model substitution, and forbidden fine-tuning practices.
-2. **Kimi K2.6 contamination judge** (opencode CLI) — independent second opinion on the same
-   contamination questions. The aggregator flags a run if **either** of the two contamination
-   judges flags it.
-3. **GPT-5.4 third-party API usage judge** (codex CLI) — separate schema (`disallowed_api_usage`),
+2. **GPT-5.4 third-party API usage judge** (codex CLI) — separate schema (`disallowed_api_usage`),
    checks whether the agent called external LLM APIs in a disallowed way. Its result is folded
    into `judge_result.json` but the per-judge file uses its own keys.
 
@@ -161,11 +158,9 @@ results/{agent}_{agent_config}_{num_hours}h[_{num_gpus}gpu]{experiment_name}/
     ├── system_monitor.log       # GPU/CPU/RAM samples from src/utils/system_monitor.sh
     ├── judge_output_gpt5_4.{json,txt}   # Judge 1 raw + parsed trace
     ├── judgement_gpt5_4.json            # Judge 1 structured verdict
-    ├── judge_output_kimi.{json,txt}     # Judge 2 raw + parsed trace
-    ├── judgement_kimi.json              # Judge 2 structured verdict
-    ├── judge_output_api.{json,txt}      # Judge 3 raw + parsed trace
-    ├── judgement_api.json               # Judge 3 structured verdict
-    ├── judge_result.json                # Aggregated verdict across all three judges
+    ├── judge_output_api.{json,txt}      # Judge 2 raw + parsed trace
+    ├── judgement_api.json               # Judge 2 structured verdict
+    ├── judge_result.json                # Aggregated verdict across both judges
     ├── final_eval_*.txt                 # vLLM/inspect-ai evaluation logs (one per retry)
     └── metrics.json                     # Final benchmark scores
 ```

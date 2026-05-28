@@ -2,49 +2,36 @@
 #
 # Run the disallowed-usage judges on a result directory.
 #
-# Three judges:
+# Two judges:
 #   1. GPT-5.4 contamination/base-model judge (via codex CLI)
-#   2. Kimi K2.6 contamination/base-model judge (via opencode CLI)
-#   3. GPT-5.4 third-party API usage judge (via codex CLI)
+#   2. GPT-5.4 third-party API usage judge (via codex CLI)
 #
-# Results from judges 1 and 2 are aggregated into judge_result_rerun.json:
-# if either flags an issue, the overall result is flagged.
-#
-# Judge 3 has a different schema (`disallowed_api_usage` instead of
-# `contamination`/`disallowed_model`) and is written to its own files
-# `judgement_api_rerun.json` and `judge_output_api_rerun.{json,txt}` — it is
-# NOT folded into judge_result_rerun.json.
+# Judge 1 is aggregated into judge_result_rerun.json. Judge 2 has a different
+# schema (`disallowed_api_usage` instead of `contamination`/`disallowed_model`)
+# and is written to its own files `judgement_api_rerun.json` and
+# `judge_output_api_rerun.{json,txt}` — it is NOT folded into the
+# contamination verdict, but its disallowed_api_usage flag is copied into
+# judge_result_rerun.json.
 #
 # All outputs are always saved with the _rerun suffix so original judge
 # outputs produced by src/run_task.sh are preserved.
 #
-# Usage: run_judge.sh [--gpt-only|--kimi-only|--api-only|--gpt-contamination-only|--kimi-contamination-only] <result_dir>
+# Usage: run_judge.sh [--gpt-only|--api-only|--gpt-contamination-only] <result_dir>
 #
 # Options:
-#   --gpt-only      Only rerun the GPT-5.4 contamination judge + the API judge
-#                   (skip Kimi); aggregation still runs using the existing
-#                   Kimi _rerun output if present.
-#   --kimi-only     Only rerun the Kimi K2.6 contamination judge
-#                   (skip both GPT-based judges); aggregation still runs using
-#                   the existing GPT _rerun output if present.
+#   --gpt-only      Only rerun the GPT-5.4 contamination judge + the API judge.
 #   --api-only      Only rerun the GPT-5.4 third-party API usage judge
-#                   (skip both contamination judges and skip aggregation).
+#                   (skip the contamination judge and skip aggregation).
 #   --gpt-contamination-only
 #                   Only rerun the GPT-5.4 contamination judge
-#                   (skip Kimi and API). Aggregation is also skipped, so
+#                   (skip the API judge). Aggregation is also skipped, so
 #                   judge_result_rerun.json is not (re)written; only
 #                   judgement_gpt5_4_rerun.json is produced.
-#   --kimi-contamination-only
-#                   Only rerun the Kimi K2.6 contamination judge
-#                   (skip GPT and API). Aggregation is also skipped, so
-#                   judge_result_rerun.json is not (re)written; only
-#                   judgement_kimi_rerun.json is produced.
 
 set -e
 
 # Parse arguments
 RUN_GPT=true
-RUN_KIMI=true
 RUN_API=true
 RUN_AGGREGATE=true
 MODE="all"
@@ -52,31 +39,15 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --gpt-only)
             MODE="gpt-only"
-            RUN_KIMI=false
-            shift
-            ;;
-        --kimi-only)
-            MODE="kimi-only"
-            RUN_GPT=false
-            RUN_API=false
             shift
             ;;
         --api-only)
             MODE="api-only"
             RUN_GPT=false
-            RUN_KIMI=false
             shift
             ;;
         --gpt-contamination-only)
             MODE="gpt-contamination-only"
-            RUN_KIMI=false
-            RUN_API=false
-            RUN_AGGREGATE=false
-            shift
-            ;;
-        --kimi-contamination-only)
-            MODE="kimi-contamination-only"
-            RUN_GPT=false
             RUN_API=false
             RUN_AGGREGATE=false
             shift
@@ -89,7 +60,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$RESULT_DIR" ]; then
-    echo "Usage: $0 [--gpt-only|--kimi-only|--api-only|--gpt-contamination-only|--kimi-contamination-only] <result_dir>" >&2
+    echo "Usage: $0 [--gpt-only|--api-only|--gpt-contamination-only] <result_dir>" >&2
     exit 1
 fi
 
@@ -129,16 +100,14 @@ MODEL_HF=$(echo "$MODEL_PART" | sed 's/_/\//')
 echo "Running judge on: $RESULT_DIR"
 echo "  Benchmark: $BENCHMARK | Model: $MODEL_HF | Trace: $TRACE_NAME"
 case "$MODE" in
-    all)                     echo "  Mode: all judges (GPT-5.4 contamination + Kimi K2.6 contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
-    gpt-only)                echo "  Mode: GPT-5.4 contamination + GPT-5.4 API (Kimi skipped), outputs suffixed with _rerun" ;;
-    kimi-only)               echo "  Mode: Kimi K2.6 contamination only (GPT-based judges skipped), outputs suffixed with _rerun" ;;
-    api-only)                echo "  Mode: GPT-5.4 API only (contamination judges skipped), outputs suffixed with _rerun" ;;
-    gpt-contamination-only)  echo "  Mode: GPT-5.4 contamination only (Kimi + API skipped, no aggregation), outputs suffixed with _rerun" ;;
-    kimi-contamination-only) echo "  Mode: Kimi K2.6 contamination only (GPT + API skipped, no aggregation), outputs suffixed with _rerun" ;;
+    all)                     echo "  Mode: all judges (GPT-5.4 contamination + GPT-5.4 API), outputs suffixed with _rerun" ;;
+    gpt-only)                echo "  Mode: GPT-5.4 contamination + GPT-5.4 API, outputs suffixed with _rerun" ;;
+    api-only)                echo "  Mode: GPT-5.4 API only (contamination judge skipped), outputs suffixed with _rerun" ;;
+    gpt-contamination-only)  echo "  Mode: GPT-5.4 contamination only (API skipped, no aggregation), outputs suffixed with _rerun" ;;
 esac
 
 # Generate judge prompts
-if [ "$RUN_GPT" = true ] || [ "$RUN_KIMI" = true ]; then
+if [ "$RUN_GPT" = true ]; then
     JUDGE_PROMPT=$(python "$SCRIPT_DIR/get_judge_prompt.py" \
         --benchmark-id "$BENCHMARK" \
         --model "$MODEL_HF")
@@ -184,31 +153,20 @@ if [ -f "$REPO_ROOT/src/eval/tasks/$BENCHMARK/test_data.json" ]; then
     cp "$REPO_ROOT/src/eval/tasks/$BENCHMARK/test_data.json" "$JOB_DIR/test_data.json"
 fi
 
-# Set up codex config + ChatGPT Pro subscription auth (only when a GPT-based judge runs).
+# Set up codex config + ChatGPT Pro subscription auth.
 # auth.json itself is bind-mounted from the shared location at apptainer exec
 # time so codex can write the rotated refresh token back to the source and the
 # next job picks it up instead of reusing a stale single-use refresh token.
 CODEX_AUTH_SRC="$REPO_ROOT/agents/codex_non_api/auth.json"
-if [ "$RUN_GPT" = true ] || [ "$RUN_API" = true ]; then
-    cp -r "$REPO_ROOT/containers/other_home_data/.codex" "$JOB_DIR/"
-    if [ ! -f "$CODEX_AUTH_SRC" ]; then
-        echo "ERROR: agents/codex_non_api/auth.json not found — GPT-5.4 judges need subscription auth" >&2
-        exit 1
-    fi
-    # Touch a placeholder so apptainer has something to bind onto inside .codex/.
-    : > "$JOB_DIR/.codex/auth.json"
-    if ! grep -q "forced_login_method" "$JOB_DIR/.codex/config.toml" 2>/dev/null; then
-        printf '\nforced_login_method = "chatgpt"\n' >> "$JOB_DIR/.codex/config.toml"
-    fi
+cp -r "$REPO_ROOT/containers/other_home_data/.codex" "$JOB_DIR/"
+if [ ! -f "$CODEX_AUTH_SRC" ]; then
+    echo "ERROR: agents/codex_non_api/auth.json not found — GPT-5.4 judges need subscription auth" >&2
+    exit 1
 fi
-
-# The Kimi judge needs either an opencode-hosted key or an OpenRouter key.
-# opencode picks them up from opencode.json (see solve.sh / Judge 2 block).
-if [ "$RUN_KIMI" = true ]; then
-    if [ -z "${OPENCODE_API_KEY:-}" ] && [ -z "${OPENROUTER_API_KEY:-}" ]; then
-        echo "ERROR: neither OPENCODE_API_KEY nor OPENROUTER_API_KEY is set — Kimi K2.6 judge needs one" >&2
-        exit 1
-    fi
+# Touch a placeholder so apptainer has something to bind onto inside .codex/.
+: > "$JOB_DIR/.codex/auth.json"
+if ! grep -q "forced_login_method" "$JOB_DIR/.codex/config.toml" 2>/dev/null; then
+    printf '\nforced_login_method = "chatgpt"\n' >> "$JOB_DIR/.codex/config.toml"
 fi
 
 # Remove any pre-existing per-judge output files in the result dir for the
@@ -217,9 +175,6 @@ fi
 # files alone so aggregation can still use them.
 if [ "$RUN_GPT" = true ]; then
     rm -f "$RESULT_DIR/judgement_gpt5_4_rerun.json"
-fi
-if [ "$RUN_KIMI" = true ]; then
-    rm -f "$RESULT_DIR/judgement_kimi_rerun.json"
 fi
 if [ "$RUN_API" = true ]; then
     rm -f "$RESULT_DIR/judgement_api_rerun.json"
@@ -267,96 +222,12 @@ if [ "$RUN_GPT" = true ]; then
 fi
 
 # ============================================================
-# Judge 2: Kimi K2.6 via opencode CLI
-# ============================================================
-if [ "$RUN_KIMI" = true ]; then
-    echo ""
-    echo "========================================="
-    echo "=== Judge 2: Kimi K2.6 (opencode CLI) ==="
-    echo "========================================="
-
-    # Prefer OPENCODE_API_KEY when set, fall back to OPENROUTER_API_KEY.
-    if [ -n "${OPENCODE_API_KEY:-}" ]; then
-        KIMI_PROVIDER="opencode"
-        KIMI_API_KEY="$OPENCODE_API_KEY"
-        KIMI_MODEL="opencode/kimi-k2.6"
-    else
-        KIMI_PROVIDER="openrouter"
-        KIMI_API_KEY="$OPENROUTER_API_KEY"
-        KIMI_MODEL="openrouter/moonshotai/kimi-k2.6"
-    fi
-
-    # opencode requires opencode.json in the working directory for provider
-    # config and auto-approval. Bake the API key directly into the config so
-    # we do not need to pass any key env vars into the apptainer sandbox.
-    # When routing via OpenRouter, pin the upstream to Cloudflare so the
-    # judge always uses the same backend regardless of OpenRouter's defaults.
-    if [ "$KIMI_PROVIDER" = "openrouter" ]; then
-        OPENROUTER_MODEL_PIN=$(cat <<JSON
-,
-      "models": {
-        "moonshotai/kimi-k2.6": {
-          "options": {
-            "provider": { "order": ["Cloudflare"], "allow_fallbacks": false }
-          }
-        }
-      }
-JSON
-)
-    else
-        OPENROUTER_MODEL_PIN=""
-    fi
-
-    cat > "$JOB_DIR/task/opencode.json" <<EOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "permission": "allow",
-  "provider": {
-    "${KIMI_PROVIDER}": {
-      "options": {
-        "apiKey": "${KIMI_API_KEY}"
-      }${OPENROUTER_MODEL_PIN}
-    }
-  }
-}
-EOF
-
-    JUDGE_OUTPUT_KIMI="$RESULT_DIR/judge_output_kimi_rerun.json"
-    apptainer exec \
-        --containall \
-        --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
-        --env PYTHONNOUSERSITE="1" \
-        --bind "${JOB_TMP}:/tmp" \
-        --home "${JOB_DIR}:/home/ben" \
-        --pwd "/home/ben/task" \
-        --writable-tmpfs \
-        "${POST_TRAIN_BENCH_CONTAINERS_DIR}/gpt_5_5.sif" \
-        opencode run --model "$KIMI_MODEL" --format json "$JUDGE_PROMPT" 2>&1 | tee "$JUDGE_OUTPUT_KIMI"
-
-    # Decode the opencode JSONL trace into a human-readable text report
-    python "$REPO_ROOT/src/trace_parsing/parse_trace.py" --agent opencode "$JUDGE_OUTPUT_KIMI" -o "$RESULT_DIR/judge_output_kimi_rerun.txt"
-    echo "  Kimi K2.6 judge output saved"
-
-    # Save Kimi judgement JSON with model-specific suffix
-    if [ -f "$JOB_DIR/task/judgement.json" ]; then
-        cp "$JOB_DIR/task/judgement.json" "$RESULT_DIR/judgement_kimi_rerun.json"
-        echo "  Kimi K2.6 judgement: $(cat "$RESULT_DIR/judgement_kimi_rerun.json")"
-    else
-        echo "ERROR: judgement.json not created by Kimi K2.6 judge (see $RESULT_DIR/judge_output_kimi_rerun.txt)" >&2
-        exit 1
-    fi
-
-    # Clean judgement file so the next judge starts fresh
-    rm -f "$JOB_DIR/task/judgement.json"
-fi
-
-# ============================================================
-# Judge 3: third-party API usage (GPT-5.4 only)
+# Judge 2: third-party API usage (GPT-5.4 only)
 # ============================================================
 if [ "$RUN_API" = true ]; then
     echo ""
     echo "========================================="
-    echo "=== Judge 3: third-party API usage (GPT-5.4) ==="
+    echo "=== Judge 2: third-party API usage (GPT-5.4) ==="
     echo "========================================="
 
     JUDGE_OUTPUT_API="$RESULT_DIR/judge_output_api_rerun.json"
@@ -387,10 +258,10 @@ if [ "$RUN_API" = true ]; then
 fi
 
 # ============================================================
-# Aggregate: contamination judges OR'd together, API verdict folded in.
+# Aggregate: GPT-5.4 contamination verdict, API verdict folded in.
 # Always re-aggregate so judge_result_rerun.json reflects the latest run.
-# All three per-judge rerun files must exist; aggregate_judgement.py fails
-# loud if any is missing.
+# Both per-judge rerun files must exist; aggregate_judgement.py fails
+# loud if either is missing.
 # Skipped in gpt-contamination-only mode (only one judge ran).
 # ============================================================
 if [ "$RUN_AGGREGATE" = true ]; then
@@ -401,7 +272,6 @@ if [ "$RUN_AGGREGATE" = true ]; then
 
     python "$SCRIPT_DIR/aggregate_judgement.py" \
         --judge "gpt5_4=$RESULT_DIR/judgement_gpt5_4_rerun.json" \
-        --judge "kimi=$RESULT_DIR/judgement_kimi_rerun.json" \
         --judge "api=$RESULT_DIR/judgement_api_rerun.json" \
         --output "$RESULT_DIR/judge_result_rerun.json"
 fi
