@@ -4,11 +4,16 @@ Collect results from raw run directories into per-method CSVs.
 
 For each method directory in the results dir, does a single pass:
   1. Finds the latest run per (benchmark, model)
-  2. Reads metrics.json, contamination files, and time_taken.txt
-  3. Applies baseline fallback for contaminated or errored cells
+  2. Reads metrics.json, judge_result.json, and time_taken.txt
+  3. Applies baseline fallback for cells flagged by the judge or with no run
   4. Writes final_{method}.csv, contamination_{method}.csv
 
 Also writes a time_overview.csv summarising average time per method.
+
+Any missing or malformed metrics.json / judge_result.json / time_taken.txt
+inside an existing run directory is a hard error — there are no silent
+fallbacks for broken runs. Cells with no run at all are filled from
+baselines.json.
 
 Usage:
     python collect.py
@@ -24,11 +29,9 @@ from utils import (
     get_baseline_fallback_data,
     walk_latest_runs,
     load_metrics,
-    load_contamination,
-    load_disallowed_model,
-    combine_contamination_results,
+    load_judge_result,
+    judge_result_to_cell,
     load_time_taken,
-    is_number,
     format_time_hms,
     BUDGET_SECONDS,
 )
@@ -81,26 +84,16 @@ def collect_method(
 
             run_dir = latest_runs[key]["path"]
 
-            # Metrics
-            metrics_path = os.path.join(run_dir, "metrics.json")
-            metrics_grid[model][bench] = load_metrics(metrics_path, method_name)
-
-            # Contamination
-            contamination = load_contamination(
-                os.path.join(run_dir, "contamination_judgement.txt")
-            )
-            disallowed = load_disallowed_model(
-                os.path.join(run_dir, "disallowed_model_judgement.txt")
-            )
-            contamination_grid[model][bench] = combine_contamination_results(
-                contamination, disallowed
+            metrics_grid[model][bench] = load_metrics(
+                os.path.join(run_dir, "metrics.json")
             )
 
-            # Time
+            judge_result = load_judge_result(run_dir)
+            contamination_grid[model][bench] = judge_result_to_cell(judge_result)
+
             _, seconds = load_time_taken(run_dir)
-            if seconds is not None:
-                time_total_seconds += seconds
-                time_valid_count += 1
+            time_total_seconds += seconds
+            time_valid_count += 1
 
     # Write contamination CSV
     contamination_path = os.path.join(
@@ -116,21 +109,19 @@ def collect_method(
             writer.writerow(row)
     print(f"Written: {contamination_path}")
 
-    # Apply baseline fallback: replace cell with baseline if
-    #   (a) value is not a number, OR
-    #   (b) contamination flag is non-empty
+    # Replace the cell with the baseline value if no run exists or the judge
+    # flagged it. load_metrics() guarantees numeric strings when a run exists,
+    # so the only non-numeric value here is "" for missing runs.
     for model in models:
         for bench in benchmarks:
             value = metrics_grid[model][bench]
             contamination_value = contamination_grid[model][bench]
 
             reasons = []
-            if not is_number(value):
-                reasons.append(f"non-numeric value ({value!r})")
-            if contamination_value.strip():
-                reasons.append(
-                    f"contamination flag ({contamination_value.strip()!r})"
-                )
+            if value == "":
+                reasons.append("no run for this (benchmark, model)")
+            if contamination_value:
+                reasons.append(f"judge flagged ({contamination_value!r})")
 
             if not reasons:
                 continue

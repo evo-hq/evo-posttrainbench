@@ -267,117 +267,122 @@ def walk_latest_runs(
 # Metrics loading
 # ---------------------------------------------------------------------------
 
-def load_metrics(metrics_path: str, method_name: str = None) -> str:
+def load_metrics(metrics_path: str) -> str:
+    """Read the accuracy from metrics.json as a string.
+
+    Raises FileNotFoundError if metrics.json is missing, json.JSONDecodeError
+    if it is unparseable, KeyError if the 'accuracy' field is absent, and
+    TypeError if 'accuracy' is not numeric. There is no silent fallback —
+    callers that want a baseline fallback for missing runs must guard the
+    call themselves.
     """
-    Return the accuracy as a string, or an error label.
-
-    Error labels for non-baseline methods:
-      - "not avl."   if time_taken.txt doesn't exist
-      - "not stored" if time_taken.txt exists but final_model/ doesn't
-      - "ERR"        otherwise
-    For baseline: always "ERR" on failure.
-    """
-    if os.path.exists(metrics_path):
-        try:
-            with open(metrics_path, "r") as f:
-                data = json.load(f)
-            acc = data.get("accuracy")
-            if acc is not None:
-                return str(acc)
-        except Exception:
-            pass
-
-    if method_name == "baseline_zeroshot":
-        return "ERR"
-
-    run_dir = os.path.dirname(metrics_path)
-
-    if not os.path.exists(os.path.join(run_dir, "time_taken.txt")):
-        return "not avl."
-
-    if not os.path.isdir(os.path.join(run_dir, "final_model")):
-        return "not stored"
-
-    return "ERR"
+    if not os.path.exists(metrics_path):
+        raise FileNotFoundError(f"metrics.json not found: {metrics_path}")
+    with open(metrics_path, "r") as f:
+        data = json.load(f)
+    if "accuracy" not in data:
+        raise KeyError(f"{metrics_path}: missing 'accuracy' field")
+    accuracy = data["accuracy"]
+    if not isinstance(accuracy, (int, float)) or isinstance(accuracy, bool):
+        raise TypeError(
+            f"{metrics_path}: 'accuracy' is not a number (got "
+            f"{type(accuracy).__name__}: {accuracy!r})"
+        )
+    return str(accuracy)
 
 
 # ---------------------------------------------------------------------------
-# Contamination loading
+# Judge result loading
 # ---------------------------------------------------------------------------
 
-def load_contamination(contamination_path: str):
-    """Return True, False, "IMPORTANT ERR", or "ERR"."""
-    if not os.path.exists(contamination_path):
-        return "ERR"
-    try:
-        with open(contamination_path, "r") as f:
-            content = f.read().strip()
-    except Exception:
-        return "ERR"
-    if content == "contamination detected":
-        return True
-    elif content == "no contamination detected":
-        return False
-    else:
-        return "IMPORTANT ERR"
+JUDGE_RESULT_FIELDS = ("contamination", "disallowed_model", "disallowed_api_usage")
 
 
-def load_disallowed_model(disallowed_path: str):
-    """Return True, False, "IMPORTANT ERR", or "ERR"."""
-    if not os.path.exists(disallowed_path):
-        return "ERR"
-    try:
-        with open(disallowed_path, "r") as f:
-            content = f.read().strip()
-    except Exception:
-        return "ERR"
-    if content == "disallowed use detected":
-        return True
-    elif content == "only allowed use detected":
-        return False
-    else:
-        return "IMPORTANT ERR"
+def load_judge_result(run_dir: str) -> dict:
+    """Load the aggregated judge verdict for a single run directory.
 
+    Prefers ``judge_result_rerun.json`` (the rerun pipeline writes this
+    alongside the original to record an updated verdict) and falls back to
+    ``judge_result.json`` from the initial ``run_task.sh`` execution.
 
-def combine_contamination_results(contamination, disallowed_model) -> str:
+    Raises FileNotFoundError when neither file exists, json.JSONDecodeError
+    on a malformed file, and ValueError/TypeError when the schema does not
+    match what ``aggregate_judgement.py`` writes. No silent defaults — an
+    older schema (``contamination_detected``/``disallowed_model_detected``)
+    is rejected so re-judging is forced rather than silently treating
+    ``disallowed_api_usage`` as False.
     """
-    Combine contamination and disallowed model results into a cell value.
+    rerun_path = os.path.join(run_dir, "judge_result_rerun.json")
+    original_path = os.path.join(run_dir, "judge_result.json")
 
-    Returns "" (clean), "C", "M", "MC", or an error string.
-    """
-    if contamination in ("ERR", "IMPORTANT ERR") or disallowed_model in (
-        "ERR",
-        "IMPORTANT ERR",
-    ):
-        errors = []
-        if contamination in ("ERR", "IMPORTANT ERR"):
-            errors.append(f"C:{contamination}")
-        if disallowed_model in ("ERR", "IMPORTANT ERR"):
-            errors.append(f"M:{disallowed_model}")
-        return " ".join(errors)
-
-    if disallowed_model and contamination:
-        return "MC"
-    elif disallowed_model and not contamination:
-        return "M"
-    elif not disallowed_model and contamination:
-        return "C"
+    if os.path.exists(rerun_path):
+        path = rerun_path
+    elif os.path.exists(original_path):
+        path = original_path
     else:
-        return ""
+        raise FileNotFoundError(
+            f"No judge result in {run_dir} "
+            f"(expected judge_result_rerun.json or judge_result.json)"
+        )
+
+    with open(path, "r") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: top-level JSON is not an object")
+
+    missing = [f for f in JUDGE_RESULT_FIELDS if f not in data]
+    if missing:
+        if "contamination_detected" in data or "disallowed_model_detected" in data:
+            raise ValueError(
+                f"{path}: old judge schema detected (contamination_detected/"
+                f"disallowed_model_detected); rerun judges via "
+                f"src/disallowed_usage_judge/run_judge.sh so the file is "
+                f"rewritten with the {JUDGE_RESULT_FIELDS} schema"
+            )
+        raise ValueError(f"{path}: missing fields: {', '.join(missing)}")
+
+    for field in JUDGE_RESULT_FIELDS:
+        if not isinstance(data[field], bool):
+            raise TypeError(
+                f"{path}: field {field!r} must be bool, got "
+                f"{type(data[field]).__name__}: {data[field]!r}"
+            )
+
+    return {field: data[field] for field in JUDGE_RESULT_FIELDS}
+
+
+def judge_result_to_cell(judge_result: dict) -> str:
+    """Encode the three judge booleans into a single-cell contamination flag.
+
+    The cell concatenates the letter for each flag that is True:
+      - 'M' = disallowed_model
+      - 'C' = contamination
+      - 'A' = disallowed_api_usage
+    Returns '' when all three flags are False. Order is fixed (M, C, A) so
+    cells are comparable across runs.
+    """
+    parts = []
+    if judge_result["disallowed_model"]:
+        parts.append("M")
+    if judge_result["contamination"]:
+        parts.append("C")
+    if judge_result["disallowed_api_usage"]:
+        parts.append("A")
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
 # Time loading
 # ---------------------------------------------------------------------------
 
-def parse_time_hms(time_str: str) -> int | None:
-    """Parse H:M:S string to total seconds. Returns None on failure."""
+def parse_time_hms(time_str: str) -> int:
+    """Parse an H:M:S string into total seconds. Raises ValueError on bad input."""
     match = re.match(r"^(\d+):(\d{1,2}):(\d{1,2})$", time_str.strip())
     if not match:
-        return None
+        raise ValueError(f"time string is not H:M:S: {time_str!r}")
     hours, minutes, seconds = map(int, match.groups())
     if minutes >= 60 or seconds >= 60:
-        return None
+        raise ValueError(f"time string has invalid minutes/seconds: {time_str!r}")
     return hours * 3600 + minutes * 60 + seconds
 
 
@@ -389,22 +394,16 @@ def format_time_hms(total_seconds: int) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
-def load_time_taken(run_dir: str) -> tuple[str, int | None]:
-    """
-    Return (display_string, total_seconds).
-    Returns ("ERR", None) on failure.
+def load_time_taken(run_dir: str) -> tuple[str, int]:
+    """Return (display_string, total_seconds) from time_taken.txt.
+
+    Raises FileNotFoundError if the file is missing and ValueError if the
+    contents are not in H:M:S format.
     """
     time_taken_path = os.path.join(run_dir, "time_taken.txt")
-
     if not os.path.exists(time_taken_path):
-        return "ERR", None
-
-    try:
-        with open(time_taken_path, "r") as f:
-            time_str = f.read().strip()
-        total_seconds = parse_time_hms(time_str)
-        if total_seconds is None:
-            return "ERR", None
-        return format_time_hms(total_seconds), total_seconds
-    except Exception:
-        return "ERR", None
+        raise FileNotFoundError(f"time_taken.txt not found: {time_taken_path}")
+    with open(time_taken_path, "r") as f:
+        time_str = f.read().strip()
+    total_seconds = parse_time_hms(time_str)
+    return format_time_hms(total_seconds), total_seconds
