@@ -2,7 +2,10 @@ test*.err
 test*.out
 test*.log
 
-# Agent auth tokens 
+# NFS silly-rename leftovers (deleted-but-still-open files)
+.nfs*
+
+# Agent auth tokens
 agents/*/auth.json
 agents/*/auth*.json
 agents/*/oauth_token*
