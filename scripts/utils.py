@@ -12,6 +12,8 @@ import re
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 FACTORS_PATH = os.path.join(SCRIPT_DIR, "factors.json")
 BASELINES_PATH = os.path.join(SCRIPT_DIR, "baselines.json")
 
@@ -156,8 +158,49 @@ def stddev(values: list[float]) -> float:
 # Paths
 # ---------------------------------------------------------------------------
 
+def load_dotenv(path: str = ENV_PATH) -> dict[str, str]:
+    """Parse the project's .env file into a dict.
+
+    Raises FileNotFoundError if the .env file does not exist — collect.py
+    and aggregate.py read configuration from .env, not from the ambient
+    environment, so a missing file is a hard error.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f".env file not found at {path}; collect.py and aggregate.py "
+            f"require a project-level .env file"
+        )
+
+    env = {}
+    with open(path, "r") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            # Strip a trailing inline comment when the value is unquoted
+            if value and value[0] not in ("'", '"'):
+                hash_idx = value.find("#")
+                if hash_idx != -1:
+                    value = value[:hash_idx].strip()
+            # Strip surrounding quotes
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            env[key] = value
+    return env
+
+
 def get_results_dir() -> str:
-    return os.environ.get("POST_TRAIN_BENCH_RESULTS_DIR", "results")
+    env = load_dotenv()
+    if "POST_TRAIN_BENCH_RESULTS_DIR" not in env:
+        raise KeyError(
+            f"POST_TRAIN_BENCH_RESULTS_DIR not set in {ENV_PATH}"
+        )
+    return env["POST_TRAIN_BENCH_RESULTS_DIR"]
 
 
 # ---------------------------------------------------------------------------
@@ -295,25 +338,24 @@ def load_metrics(metrics_path: str) -> str:
 # Judge result loading
 # ---------------------------------------------------------------------------
 
-JUDGE_RESULT_FIELDS = ("contamination", "disallowed_model", "disallowed_api_usage")
+JUDGE_RESULT_FIELDS = ("contamination", "disallowed_model")
 
 
 def load_judge_result(run_dir: str) -> dict:
-    """Load the aggregated judge verdict for a single run directory.
+    """Load the GPT-5.4 contamination judge verdict for a single run directory.
 
-    Prefers ``judge_result_rerun.json`` (the rerun pipeline writes this
-    alongside the original to record an updated verdict) and falls back to
-    ``judge_result.json`` from the initial ``run_task.sh`` execution.
+    Reads only the GPT-5.4 contamination judge output — the third-party API
+    usage judge (``judgement_api.json``) and the aggregated
+    ``judge_result.json`` are intentionally ignored. Prefers
+    ``judgement_gpt5_4_rerun.json`` (written by the rerun pipeline) and falls
+    back to ``judgement_gpt5_4.json`` from the initial ``run_task.sh`` run.
 
     Raises FileNotFoundError when neither file exists, json.JSONDecodeError
     on a malformed file, and ValueError/TypeError when the schema does not
-    match what ``aggregate_judgement.py`` writes. No silent defaults — an
-    older schema (``contamination_detected``/``disallowed_model_detected``)
-    is rejected so re-judging is forced rather than silently treating
-    ``disallowed_api_usage`` as False.
+    match what the contamination judge writes.
     """
-    rerun_path = os.path.join(run_dir, "judge_result_rerun.json")
-    original_path = os.path.join(run_dir, "judge_result.json")
+    rerun_path = os.path.join(run_dir, "judgement_gpt5_4_rerun.json")
+    original_path = os.path.join(run_dir, "judgement_gpt5_4.json")
 
     if os.path.exists(rerun_path):
         path = rerun_path
@@ -321,8 +363,8 @@ def load_judge_result(run_dir: str) -> dict:
         path = original_path
     else:
         raise FileNotFoundError(
-            f"No judge result in {run_dir} "
-            f"(expected judge_result_rerun.json or judge_result.json)"
+            f"No GPT-5.4 contamination judgement in {run_dir} "
+            f"(expected judgement_gpt5_4_rerun.json or judgement_gpt5_4.json)"
         )
 
     with open(path, "r") as f:
@@ -332,13 +374,6 @@ def load_judge_result(run_dir: str) -> dict:
 
     missing = [f for f in JUDGE_RESULT_FIELDS if f not in data]
     if missing:
-        if "contamination_detected" in data or "disallowed_model_detected" in data:
-            raise ValueError(
-                f"{path}: old judge schema detected (contamination_detected/"
-                f"disallowed_model_detected); rerun judges via "
-                f"src/disallowed_usage_judge/run_judge.sh so the file is "
-                f"rewritten with the {JUDGE_RESULT_FIELDS} schema"
-            )
         raise ValueError(f"{path}: missing fields: {', '.join(missing)}")
 
     for field in JUDGE_RESULT_FIELDS:
@@ -352,22 +387,19 @@ def load_judge_result(run_dir: str) -> dict:
 
 
 def judge_result_to_cell(judge_result: dict) -> str:
-    """Encode the three judge booleans into a single-cell contamination flag.
+    """Encode the GPT-5.4 contamination judge booleans into a single cell.
 
     The cell concatenates the letter for each flag that is True:
       - 'M' = disallowed_model
       - 'C' = contamination
-      - 'A' = disallowed_api_usage
-    Returns '' when all three flags are False. Order is fixed (M, C, A) so
-    cells are comparable across runs.
+    Returns '' when both flags are False. Order is fixed (M, C) so cells are
+    comparable across runs.
     """
     parts = []
     if judge_result["disallowed_model"]:
         parts.append("M")
     if judge_result["contamination"]:
         parts.append("C")
-    if judge_result["disallowed_api_usage"]:
-        parts.append("A")
     return "".join(parts)
 
 

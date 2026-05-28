@@ -84,9 +84,12 @@ def collect_method(
 
             run_dir = latest_runs[key]["path"]
 
-            metrics_grid[model][bench] = load_metrics(
-                os.path.join(run_dir, "metrics.json")
-            )
+            metrics_path = os.path.join(run_dir, "metrics.json")
+            if not os.path.exists(metrics_path):
+                print(f"WARNING: metrics.json not found: {metrics_path}")
+                metrics_grid[model][bench] = ""
+            else:
+                metrics_grid[model][bench] = load_metrics(metrics_path)
 
             judge_result = load_judge_result(run_dir)
             contamination_grid[model][bench] = judge_result_to_cell(judge_result)
@@ -187,7 +190,7 @@ def parse_args():
         "--data-dir",
         default=None,
         help="Directory containing method subdirectories with raw run data. "
-        "Defaults to POST_TRAIN_BENCH_RESULTS_DIR or 'results'.",
+        "Defaults to POST_TRAIN_BENCH_RESULTS_DIR from the project's .env file.",
     )
     parser.add_argument(
         "--output-dir",

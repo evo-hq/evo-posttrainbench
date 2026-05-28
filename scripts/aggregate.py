@@ -299,7 +299,7 @@ def parse_args():
         "--data-dir",
         default=None,
         help="Directory containing final_*.csv files (from collect.py). "
-        "Defaults to POST_TRAIN_BENCH_RESULTS_DIR or 'results'.",
+        "Defaults to POST_TRAIN_BENCH_RESULTS_DIR from the project's .env file.",
     )
     parser.add_argument(
         "--output-dir",
