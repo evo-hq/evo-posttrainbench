@@ -2,10 +2,6 @@
 """
 Collect results from raw run directories into per-method CSVs.
 
-# For comparing to previous version: 
-Replaces: aggregate_methods.py, aggregate_contamination.py,
-          aggregate_final.py, aggregate_time.py
-
 For each method directory in the results dir, does a single pass:
   1. Finds the latest run per (benchmark, model)
   2. Reads metrics.json, contamination files, and time_taken.txt
