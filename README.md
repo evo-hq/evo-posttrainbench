@@ -7,6 +7,9 @@ We introduce PostTrainBench, a benchmark that measures the ability of CLI agents
 > [!IMPORTANT]
 > **Harbor support coming soon!** This repository currently targets our internal HPC cluster (HTCondor). We are adding [Harbor](https://github.com/harbor-framework/harbor) support to make it straightforward to run on rented hardware (e.g., cloud GPUs). See our [PR](https://github.com/aisa-group/PostTrainBench/pull/8).
 
+> [!NOTE]
+> **Fork: evo variant.** This fork adds an [evo](https://github.com/evo-hq/evo)-driven agent (Claude Code + evo plugin + `finetuning` skill, OAuth) and an apptainer-free runner for a single rented H100 (JarvisLabs/RunPod). See **[EVO_RUN.md](EVO_RUN.md)** — `agents/claude_evo_max/` + `scripts/run_evo_jarvislabs.sh`.
+
 ## Leaderboard
 
 ![Main Plot](assets/main_plot_v1.png)
