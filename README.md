@@ -24,17 +24,19 @@ Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evalua
    — installs the pinned env + vLLM + flash-attn + `inspect_evals` + Claude Code, and evo from its `feat/model-update` branch (which carries the `finetuning` skill).
 3. Once: set auth in `$WORK/.env` — either `ANTHROPIC_API_KEY` (API billing) or a Max-subscription OAuth token (`claude setup-token` → `$WORK/oauth_token`). Also add `HF_TOKEN` (Gemma-3-4B is gated) and `WANDB_API_KEY`.
 4. Smoke-test one short cell, then run:
-   `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B 10`
+   `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B-Base 10`
 
 Results land in `$WORK/runs/<...>/`: `prompt.txt`, `solve_out.txt` + `solve_parsed.txt` (the agent transcript), `final_model/`, `metrics.json`, `final_eval.txt`.
 
 ## Models
 
-AIME 2025 × {Qwen3-4B, Gemma-3-4B, SmolLM3-3B, Qwen3-1.7B}. Lean on the 4B models (1.7B tends to floor on AIME). Compare to the published Claude-Code baselines on the [leaderboard](https://posttrainbench.com) rather than running your own baseline.
+AIME 2025 × two base models: **`Qwen/Qwen3-4B-Base`** and **`google/gemma-3-4b-pt`**. Compare to the published Claude-Code baselines on the [leaderboard](https://posttrainbench.com) rather than running your own baseline.
 
 ## Monitor
 
-evo dashboard (tree/scores/frontier; served on `:8080`, reach via `ssh -L 8080:localhost:8080 <host>`), W&B for training curves (survives pause, no tunnel), `nvtop` for the GPU — all inside `tmux` so it survives disconnect.
+- **evo dashboard** (tree/scores/frontier/traces): it binds `127.0.0.1:8080`, so expose it with `bash scripts/run_evo_jarvislabs.sh dashboard` (bridges to `0.0.0.0:8090` via socat) and **open port 8090 on the instance** (on JarvisLabs, add it to the instance's exposed ports). SSH tunnel `ssh -L 8080:localhost:8080 <host>` works as a fallback.
+- **W&B** for training curves (survives pause, no tunnel); **`nvtop`** for the GPU.
+- Run inside `tmux` so it survives disconnect.
 
 ## Caveats — untested; smoke-test first
 

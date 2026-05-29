@@ -24,6 +24,7 @@ bootstrap() {
   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
   command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs; }
+  command -v socat >/dev/null || apt-get install -y socat   # to expose the dashboard port
   npm install -g @anthropic-ai/claude-code@2.1.76          # match the version they ran
 
   # PostTrainBench starting environment (pinned) + vLLM + flash-attn
@@ -52,7 +53,7 @@ bootstrap() {
 
 run() {
   local TASK="${1:-aime2025}"
-  local MODEL="${2:-Qwen/Qwen3-4B}"
+  local MODEL="${2:-Qwen/Qwen3-4B-Base}"
   local HOURS="${3:-10}"
   local AGENT="claude_evo_max"
   local AGENT_CONFIG="${AGENT_CONFIG:-claude-opus-4-6}"
@@ -98,8 +99,18 @@ run() {
   echo "results: $RUN"
 }
 
+dashboard() {
+  # evo's dashboard binds 127.0.0.1 only; bridge it to 0.0.0.0 so the port can be
+  # opened on the cloud instance. Open PUBLIC_PORT on JarvisLabs to reach it.
+  local PUBLIC="${PUBLIC_PORT:-8090}" INTERNAL="${EVO_DASH_PORT:-8080}"
+  command -v socat >/dev/null || { echo "socat missing -- run bootstrap"; exit 1; }
+  echo "exposing evo dashboard 127.0.0.1:$INTERNAL -> 0.0.0.0:$PUBLIC (open port $PUBLIC on the instance)"
+  exec socat "TCP-LISTEN:${PUBLIC},fork,reuseaddr" "TCP:127.0.0.1:${INTERNAL}"
+}
+
 case "$CMD" in
   bootstrap) bootstrap ;;
   run) shift; run "$@" ;;
-  *) echo "usage: $0 bootstrap | run [task=aime2025] [model=Qwen/Qwen3-4B] [hours=10]" ;;
+  dashboard) dashboard ;;
+  *) echo "usage: $0 bootstrap | run [task=aime2025] [model=Qwen/Qwen3-4B-Base] [hours=10] | dashboard" ;;
 esac
