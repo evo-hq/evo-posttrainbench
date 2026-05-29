@@ -1,12 +1,12 @@
 # evo-posttrainbench
 
-Replication harness for running **[evo](https://github.com/evo-hq/evo)** on **PostTrainBench** — measuring whether evo's structured optimize loop plus its `finetuning` skill helps a CLI agent post-train a model, versus the published baselines.
+Replication harness for running **[evo](https://github.com/evo-hq/evo)** on **PostTrainBench** — measuring whether evo's structured optimize loop helps a CLI agent post-train a model, versus the published baselines.
 
 Fork of **[aisa-group/PostTrainBench](https://github.com/aisa-group/PostTrainBench)** (arXiv:2603.08640, MIT). We keep their eval harness (the task `evaluate.py` + templates + prompt) and add an evo-driven agent plus an apptainer-free runner for a single rented H100. Upstream's other agents, container images, judge, and tooling are removed — pull them from `upstream` if you need them.
 
 ## What it runs
 
-The agent is **Claude Code + the evo plugin + its `finetuning` skill**. It post-trains a base model on **AIME 2025** under PostTrainBench's rules and is scored by the task's `evaluate.py`. Auth works with either an API key or a Max subscription.
+The agent is **Claude Code + the evo plugin**. It post-trains a base model on **AIME 2025** under PostTrainBench's rules and is scored by the task's `evaluate.py`. Auth works with either an API key or a Max subscription.
 
 Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evaluate.py` or `templates/`; only fine-tune the provided base model; `final_model` must run in the starting environment. These map onto evo gates.
 
