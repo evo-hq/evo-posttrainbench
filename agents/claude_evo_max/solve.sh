@@ -4,18 +4,19 @@
 # installed plugin plus the evo-engagement preamble the runner prepends to $PROMPT.
 unset GEMINI_API_KEY
 unset CODEX_API_KEY
-export ANTHROPIC_API_KEY=""   # force the OAuth/subscription path
 
-# OAuth token: use it if the runner already exported it, else read the file
-# (default path matches the apptainer harness convention).
-if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
-    TOKEN_FILE="${OAUTH_TOKEN_FILE:-/home/ben/oauth_token}"
-    if [ -f "$TOKEN_FILE" ]; then
-        export CLAUDE_CODE_OAUTH_TOKEN="$(cat "$TOKEN_FILE")"
-    else
-        echo "ERROR: no OAuth token (set CLAUDE_CODE_OAUTH_TOKEN or place a file at $TOKEN_FILE)" >&2
-        exit 1
-    fi
+# Auth: prefer OAuth / Max subscription if a token is present, else fall back to
+# an API key. (OAuth token via env, or a file -- default path matches the
+# apptainer harness convention.)
+TOKEN_FILE="${OAUTH_TOKEN_FILE:-/home/ben/oauth_token}"
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || [ -f "$TOKEN_FILE" ]; then
+    [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || export CLAUDE_CODE_OAUTH_TOKEN="$(cat "$TOKEN_FILE")"
+    export ANTHROPIC_API_KEY=""          # use the subscription path
+elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    :                                    # use the API key as-is
+else
+    echo "ERROR: no Claude auth -- set an OAuth token ($TOKEN_FILE or CLAUDE_CODE_OAUTH_TOKEN) or ANTHROPIC_API_KEY" >&2
+    exit 1
 fi
 
 export BASH_MAX_TIMEOUT_MS="36000000"

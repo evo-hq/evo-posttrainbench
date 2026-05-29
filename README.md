@@ -19,6 +19,13 @@ Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evalua
 
 ## Replicate (single rented H100; keep everything under `/home`, which persists)
 
+**Quickest — one interactive script** (prompts for workspace, auth, secrets; installs everything; sanity-checks; exits early if there's no GPU):
+```
+git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench && bash scripts/setup.sh
+```
+
+Or do it manually:
+
 1. `git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench`
 2. `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh bootstrap`
    — installs the pinned env + vLLM + flash-attn + `inspect_evals` + Claude Code, and evo from its `feat/model-update` branch (which carries the `finetuning` skill).

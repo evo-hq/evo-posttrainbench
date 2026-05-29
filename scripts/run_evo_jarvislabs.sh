@@ -19,7 +19,14 @@ EVO_BRANCH="${EVO_BRANCH:-feat/model-update}"
 export HF_HOME="${HF_HOME:-$WORK/hf}"
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$WORK/.claude}"
 
+require_gpu() {
+  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L 2>/dev/null | grep -q 'GPU'; then
+    echo "ERROR: no NVIDIA GPU found (need a GPU host)." >&2; exit 1
+  fi
+}
+
 bootstrap() {
+  require_gpu
   mkdir -p "$WORK" "$HF_HOME" "$CLAUDE_CONFIG_DIR" "$WORK/runs"
   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
@@ -52,6 +59,7 @@ bootstrap() {
 }
 
 run() {
+  require_gpu
   local TASK="${1:-aime2025}"
   local MODEL="${2:-Qwen/Qwen3-4B-Base}"
   local HOURS="${3:-10}"
@@ -60,7 +68,9 @@ run() {
 
   [ -f "$WORK/.env" ] && { set -a; source "$WORK/.env"; set +a; }
   export OAUTH_TOKEN_FILE="$WORK/oauth_token"
-  [ -f "$OAUTH_TOKEN_FILE" ] || { echo "missing $OAUTH_TOKEN_FILE (run: claude setup-token)"; exit 1; }
+  if [ ! -f "$OAUTH_TOKEN_FILE" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "no Claude auth: create $OAUTH_TOKEN_FILE (claude setup-token) or set ANTHROPIC_API_KEY in $WORK/.env"; exit 1
+  fi
 
   local RUN JOB
   RUN="$WORK/runs/${AGENT}_${TASK}_$(echo "$MODEL" | tr '/:' '__')_$(date +%s)"
