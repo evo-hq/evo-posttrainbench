@@ -17,23 +17,26 @@ Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evalua
 - `src/eval/` — upstream eval harness (the AIME task, jinja templates, prompt generator).
 - `containers/requirements-direct.txt` — the pinned starting environment.
 
-## Replicate (single rented H100; keep everything under `/home`, which persists)
+## How to replicate
 
-**Quickest — one interactive script** (prompts for workspace, auth, secrets; installs everything; sanity-checks; exits early if there's no GPU):
-```
-git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench && bash scripts/setup.sh
-```
+You need a single rented **H100** (JarvisLabs/RunPod). Keep everything under `/home` — it persists across pause; `/root` and system installs get wiped.
 
-Or do it manually:
+1. **Provision + SSH** into the H100. On JarvisLabs, also open port **8090** in the instance's exposed ports (for the dashboard).
+2. **Set it up** — one interactive script (prompts for workspace + auth + secrets, installs everything, sanity-checks, and **exits early if there's no GPU**):
+   ```
+   git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench && bash scripts/setup.sh
+   ```
+   Claude auth accepts an **API key** *or* a **Max-subscription OAuth token** (`claude setup-token` on your laptop → paste). `google/gemma-3-4b-pt` is gated, so have an `HF_TOKEN` ready.
+3. **Run** — inside `tmux` so it survives disconnect:
+   ```
+   WORK=/home/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B-Base 1     # 1h smoke first
+   WORK=/home/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B-Base 10
+   WORK=/home/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 google/gemma-3-4b-pt 10
+   ```
+   Results land in `$WORK/runs/<...>/`: `prompt.txt`, `solve_parsed.txt` (agent transcript), `final_model/`, `metrics.json`, `final_eval.txt`.
+4. **Monitor** — `WORK=/home/ptb bash scripts/run_evo_jarvislabs.sh dashboard` exposes the dashboard on `0.0.0.0:8090`; plus `nvtop` and W&B (see [Monitor](#monitor)).
 
-1. `git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench`
-2. `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh bootstrap`
-   — installs the pinned env + vLLM + flash-attn + `inspect_evals` + Claude Code, and evo from its `feat/model-update` branch (which carries the `finetuning` skill).
-3. Once: set auth in `$WORK/.env` — either `ANTHROPIC_API_KEY` (API billing) or a Max-subscription OAuth token (`claude setup-token` → `$WORK/oauth_token`). Also add `HF_TOKEN` (Gemma-3-4B is gated) and `WANDB_API_KEY`.
-4. Smoke-test one short cell, then run:
-   `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B-Base 10`
-
-Results land in `$WORK/runs/<...>/`: `prompt.txt`, `solve_out.txt` + `solve_parsed.txt` (the agent transcript), `final_model/`, `metrics.json`, `final_eval.txt`.
+After a pause, re-run step 2 (`setup.sh`, or just `… bootstrap`) — `/home` survives but the installs don't. Prefer manual? `setup.sh` only chains `run_evo_jarvislabs.sh bootstrap` → write `$WORK/.env` (+ `$WORK/oauth_token`) → `run`.
 
 ## Models
 
