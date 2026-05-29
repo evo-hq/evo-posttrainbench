@@ -6,7 +6,7 @@ Fork of **[aisa-group/PostTrainBench](https://github.com/aisa-group/PostTrainBen
 
 ## What it runs
 
-The agent is **Claude Code + the evo plugin + its `finetuning` skill**, on a Max subscription (OAuth), Opus 4.6 at effort=max. It post-trains a base model on **AIME 2025** under PostTrainBench's rules and is scored by the task's `evaluate.py`.
+The agent is **Claude Code + the evo plugin + its `finetuning` skill**. It post-trains a base model on **AIME 2025** under PostTrainBench's rules and is scored by the task's `evaluate.py`. Auth works with either an API key or a Max subscription.
 
 Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evaluate.py` or `templates/`; only fine-tune the provided base model; `final_model` must run in the starting environment. These map onto evo gates.
 
@@ -22,7 +22,7 @@ Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evalua
 1. `git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench`
 2. `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh bootstrap`
    — installs the pinned env + vLLM + flash-attn + `inspect_evals` + Claude Code, and evo from its `feat/model-update` branch (which carries the `finetuning` skill).
-3. Once: `claude setup-token` (browser OAuth) → save the token to `$WORK/oauth_token`; put `HF_TOKEN` (Gemma-3-4B is gated) and `WANDB_API_KEY` in `$WORK/.env`.
+3. Once: set auth in `$WORK/.env` — either `ANTHROPIC_API_KEY` (API billing) or a Max-subscription OAuth token (`claude setup-token` → `$WORK/oauth_token`). Also add `HF_TOKEN` (Gemma-3-4B is gated) and `WANDB_API_KEY`.
 4. Smoke-test one short cell, then run:
    `WORK=/home/$(whoami)/ptb bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B 10`
 
