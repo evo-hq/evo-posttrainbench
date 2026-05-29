@@ -31,6 +31,15 @@ bootstrap() {
   uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
   uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation
 
+  # eval deps: inspect_evals registers the task (e.g. inspect_evals/aime2025); the
+  # vLLM-stdout inspect_ai fork is what their evaluate.py uses. Pinned to match upstream.
+  local INS; INS=$(mktemp -d)
+  git clone https://github.com/UKGovernmentBEIS/inspect_evals.git "$INS/inspect_evals" \
+    && ( cd "$INS/inspect_evals" && git checkout 06001a83e6d7c709c2ede0570dce7f1031a0bad8 \
+         && uv pip install --system --no-cache . )
+  git clone https://github.com/rank-and-file/inspect_ai_vllm_stdout.git "$INS/inspect_ai_vllm_stdout" \
+    && ( cd "$INS/inspect_ai_vllm_stdout" && uv pip install --system --no-cache . )
+
   # evo from our branch + register the plugin (incl. the finetuning skill) into Claude Code
   [ -d "$WORK/evo" ] || git clone -b "$EVO_BRANCH" https://github.com/evo-hq/evo.git "$WORK/evo"
   uv tool install --editable "$WORK/evo/plugins/evo"

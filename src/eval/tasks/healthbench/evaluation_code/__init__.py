@@ -1,2 +1,0 @@
-# HealthBench evaluation code
-
