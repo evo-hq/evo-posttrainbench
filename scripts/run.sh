@@ -99,6 +99,22 @@ run() {
   [ -d "src/eval/tasks/$TASK/task_context" ] && cp -r "src/eval/tasks/$TASK/task_context/"* "$JOB/" || true
   bash src/utils/create_timer.sh "$HOURS" "$JOB/timer.sh"
 
+  # Stop hook: don't let the agent declare itself "done" before the budget is
+  # spent or a final_model exists. Scoped per-run via .claude/settings.json in
+  # the task dir (= CLAUDE_PROJECT_DIR at agent launch).
+  mkdir -p "$JOB/.claude"
+  cp "$REPO/scripts/keep_going.sh" "$JOB/keep_going.sh"
+  chmod +x "$JOB/keep_going.sh"
+  cat > "$JOB/.claude/settings.json" <<'EOF'
+{
+  "hooks": {
+    "Stop": [
+      { "matcher": "", "hooks": [ { "type": "command", "command": "bash ${CLAUDE_PROJECT_DIR}/keep_going.sh" } ] }
+    ]
+  }
+}
+EOF
+
   # prompt = PostTrainBench's standard task prompt + an evo-engagement preamble
   local BASE EVO_PRE PROMPT
   BASE=$(python src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
@@ -110,8 +126,9 @@ run() {
 
   # run the agent directly (no apptainer), bounded by the hour budget
   export PROMPT AGENT_CONFIG
+  # tee so the agent's stream-json shows in `modal app logs` AND persists to disk
   ( cd "$JOB" && timeout --signal=TERM --kill-after=60s "$((HOURS * 60 + 5))m" \
-      bash "$REPO/agents/$AGENT/solve.sh" ) > "$RUN/solve_out.txt" 2>&1 || true
+      bash "$REPO/agents/$AGENT/solve.sh" ) 2>&1 | tee "$RUN/solve_out.txt" || true
   python "agents/$AGENT/human_readable_trace.py" "$RUN/solve_out.txt" -o "$RUN/solve_parsed.txt" || true
 
   # evaluate final_model (single pass; their harness adds judge + max-token retries)
