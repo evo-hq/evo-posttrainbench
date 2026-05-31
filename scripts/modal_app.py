@@ -97,21 +97,28 @@ SECRETS = [
 COMMON = dict(volumes={"/workspace": vol}, secrets=SECRETS)
 
 
+# Refresh CLI from /opt/evo at container start so the version on PATH matches
+# the marketplace plugin (which `evo install` always pulls fresh from main).
+# The image layer is cached at first-build state, so without this the CLI
+# drifts behind -- breaking both the discover skill's version-match gate
+# (train function) and the EVO_DASHBOARD_HOST=0.0.0.0 binding (dashboard
+# function, where older CLI ignored the env var and bound 127.0.0.1, causing
+# Modal's wait_for_web_server to time out). Used by both train and dashboard.
+# The branch gets force-pushed so we hard-reset rather than --ff-only.
+_REFRESH_EVO_CLI = (
+    f"cd /opt/evo && git fetch origin {EVO_BRANCH} && "
+    f"git reset --hard origin/{EVO_BRANCH} && "
+    "uv tool install --reinstall --editable /opt/evo/plugins/evo; "
+)
+
+
 def _agent_cmd(task: str, model: str, hours: int) -> str:
     """The bash one-liner that installs the plugin into the volume's CLAUDE_CONFIG_DIR
     (idempotent) and runs the same scripts/run.sh used on JarvisLabs."""
     return (
         "set -euo pipefail; "
         "cd /opt/ptb && git pull --ff-only origin main; "                  # always run the latest scripts
-        # CLI is in the image but the layer is cached -- fetch + hard-reset
-        # (the branch gets force-pushed, so --ff-only refuses; we don't care
-        # about local state because /opt/evo is a fresh image clone) and
-        # reinstall so the `evo` on PATH matches the marketplace plugin version
-        # (which `evo install` below pulls fresh). Without this the CLI drifts
-        # behind and the discover skill's version-match gate fails.
-        f"cd /opt/evo && git fetch origin {EVO_BRANCH} && "
-        f"git reset --hard origin/{EVO_BRANCH} && "
-        "uv tool install --reinstall --editable /opt/evo/plugins/evo; "
+        + _REFRESH_EVO_CLI +
         "export WORK=/workspace REPO=/opt/ptb "
         "HF_HOME=/workspace/hf CLAUDE_CONFIG_DIR=/workspace/.claude "
         "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 "
@@ -188,6 +195,8 @@ def dashboard():
     """Public HTTPS dashboard against the latest run dir on the Volume.
     URL: https://<workspace>--<app>-dashboard.modal.run"""
     cmd = (
+        "set -euo pipefail; "
+        + _REFRESH_EVO_CLI +
         "LATEST=$(ls -1dt /workspace/runs/*/task 2>/dev/null | head -1); "
         '[ -z "$LATEST" ] && LATEST=/workspace; '
         'cd "$LATEST" && '
