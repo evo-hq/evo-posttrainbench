@@ -115,27 +115,30 @@ run() {
 }
 EOF
 
-  # prompt = imperative evo-engagement preamble + PostTrainBench's standard task prompt
-  local BASE BENCH_NAME EVO_PRE PROMPT
+  # prompt = imperative evo-engagement preamble + PostTrainBench's standard task prompt.
+  # NB: the heredoc is written to a file *outside* a $(...) subshell -- bash 3.2
+  # (macOS default; matters for `bash -n` linting locally) miscounts heredocs in
+  # command substitution. The Modal container has bash 5 and doesn't care, but
+  # we want clean local lints too.
+  local BASE BENCH_NAME PROMPT
   BASE=$(python src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
   BENCH_NAME=$(tr -d '\n' < "src/eval/tasks/$TASK/benchmark.txt")
-  EVO_PRE=$(cat <<EOF
+  cat > "$RUN/prompt.txt" <<'EOF'
 You MUST orchestrate this run via evo (the plugin is already installed in this Claude Code session). Before writing any training code or calling evaluate.py directly, you MUST do these two actions in order:
 
-1. Invoke the **evo:discover** skill, seeded with this description: "improve ${MODEL} on ${BENCH_NAME} via post-training; the benchmark is ./evaluate.py (already provided -- do not modify per rule 4); curate training data from public sources only, NEVER ${BENCH_NAME} test data (per rule 3); only fine-tune ${MODEL} (per rule 7); final_model must be the best gate-passing checkpoint." Let discover construct the baseline + gates and run the first experiment before you do anything else.
+1. Invoke the evo:discover skill, seeded with this description: "improve __MODEL__ on __BENCH__ via post-training; the benchmark is ./evaluate.py (already provided -- do not modify per rule 4); curate training data from public sources only, NEVER __BENCH__ test data (per rule 3); only fine-tune __MODEL__ (per rule 7); final_model must be the best gate-passing checkpoint." Let discover construct the baseline + gates and run the first experiment before you do anything else.
 
-2. Then invoke the **evo:optimize** skill with parameters 'subagents=1' (one H100 = one GPU training job at a time; use subagent parallelism only for non-GPU work like data curation/analysis). Let the optimize loop propose post-training experiments, train, score each on the held-out split, and keep what improves. Pick 'budget' and 'stall' appropriate to your remaining time (check with 'bash timer.sh').
+2. Then invoke the evo:optimize skill. Let the optimize loop propose post-training experiments, train, score each on a held-out split it carves, and keep what improves. Pick parameters appropriate to your remaining time (check via bash timer.sh) and your compute.
 
-3. While the optimize loop runs, follow the **finetuning** skill for method and diagnostic judgment. Take the LOCAL training path (this box's TRL/PEFT + vLLM serving; no managed service is available). Log training metrics via trackio (installed; wandb-API-compatible -- 'import trackio as wandb; wandb.init(project="ptb", space_id=os.environ["TRACKIO_SPACE_ID"])').
+3. While the optimize loop runs, follow the finetuning skill for method and diagnostic judgment. Take the LOCAL training path (TRL/PEFT and vLLM are installed). Log training metrics via trackio (installed; wandb-API-compatible -- "import trackio as wandb; wandb.init(project='ptb', space_id=os.environ['TRACKIO_SPACE_ID'])").
 
-'final_model/' at the end must be evo's best gate-passing checkpoint. Do NOT skip the evo:discover and evo:optimize steps -- that is the whole point of this agent variant. Obey every PostTrainBench rule below.
+final_model/ at the end must be evo's best gate-passing checkpoint. Do NOT skip the evo:discover and evo:optimize steps -- that is the whole point of this agent variant. Obey every PostTrainBench rule below.
 
 EOF
-)
-  PROMPT="${EVO_PRE}
-
-${BASE}"
-  printf '%s' "$PROMPT" > "$RUN/prompt.txt"
+  sed -i.bak -e "s|__MODEL__|$MODEL|g" -e "s|__BENCH__|$BENCH_NAME|g" "$RUN/prompt.txt"
+  rm -f "$RUN/prompt.txt.bak"
+  printf '%s' "$BASE" >> "$RUN/prompt.txt"
+  PROMPT=$(cat "$RUN/prompt.txt")
 
   # run the agent directly (no apptainer), bounded by the hour budget
   export PROMPT AGENT_CONFIG
