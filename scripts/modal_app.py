@@ -33,7 +33,10 @@ image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04", add_python="3.10"
     )
-    .apt_install("git", "curl", "build-essential", "tmux", "tree")
+    # `cargo` is for building evo's evo-hook-drain Rust binary at the
+    # last layer below; goes here (early/stable layer) so a branch flip
+    # doesn't reinstall Rust each time.
+    .apt_install("git", "curl", "build-essential", "tmux", "tree", "rustc", "cargo")
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
@@ -74,11 +77,24 @@ image = (
         "&& uv pip install --system --no-cache .",
     )
     # evo from our branch -- last so flipping the branch only re-runs this layer.
+    # Build the evo-hook-drain Rust binary in the same layer so it's present
+    # without depending on the GitHub release (which doesn't exist for pre-publish
+    # alphas). The runtime CLI refresh (_REFRESH_EVO_CLI in _agent_cmd) will
+    # rebuild this if the branch has new Rust source.
     .run_commands(
         f"git clone -b {EVO_BRANCH} https://github.com/evo-hq/evo.git /opt/evo "
-        "&& uv tool install --editable /opt/evo/plugins/evo",
+        "&& uv tool install --editable /opt/evo/plugins/evo "
+        "&& cd /opt/evo/plugins/evo/bin/evo-hook-drain-rs "
+        "&& cargo build --release "
+        "&& cp target/release/evo-hook-drain /opt/evo-hook-drain",
     )
-    .env({"PATH": "/root/.local/bin:/usr/local/bin:/usr/bin:/bin"})
+    .env({
+        "PATH": "/root/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        # ensure_hook_drain_binary checks this env var first -- bypasses the
+        # GitHub release fetch (which 404s for pre-publish alphas) by copying
+        # the local file we built at image time.
+        "EVO_HOOK_DRAIN_BINARY": "/opt/evo-hook-drain",
+    })
 )
 
 app = modal.App(APP, image=image)
@@ -108,7 +124,14 @@ COMMON = dict(volumes={"/workspace": vol}, secrets=SECRETS)
 _REFRESH_EVO_CLI = (
     f"cd /opt/evo && git fetch origin {EVO_BRANCH} && "
     f"git reset --hard origin/{EVO_BRANCH} && "
-    "uv tool install --reinstall --editable /opt/evo/plugins/evo; "
+    "uv tool install --reinstall --editable /opt/evo/plugins/evo && "
+    # Rebuild evo-hook-drain too if Rust source changed since the image
+    # was built. cargo is incremental, so this is fast (~1s) when nothing
+    # changed. EVO_HOOK_DRAIN_BINARY=/opt/evo-hook-drain (set in image env)
+    # is what `evo install claude-code` reads when staging the hook.
+    "cd /opt/evo/plugins/evo/bin/evo-hook-drain-rs && "
+    "cargo build --release --quiet && "
+    "cp target/release/evo-hook-drain /opt/evo-hook-drain; "
 )
 
 
@@ -125,30 +148,14 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
         "IS_SANDBOX=1 "                                                    # claude --dangerously-skip-permissions otherwise rejects root
         'TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"; '
         "mkdir -p \"$HF_HOME\" \"$CLAUDE_CONFIG_DIR\"; "
-        # Install plugin from the LOCAL /opt/evo clone (feat/model-update tip)
+        # Install plugin from the LOCAL /opt/evo clone (feat/model-update tip),
         # NOT from the public marketplace -- marketplace points at origin/main
         # which lags behind feat/model-update. From-path uses the same source
         # the CLI was built from, so skills + CLI versions stay in sync.
+        # ensure_hook_drain_binary reads EVO_HOOK_DRAIN_BINARY (set in image
+        # env to /opt/evo-hook-drain, rebuilt at runtime via _REFRESH_EVO_CLI)
+        # to bypass the GitHub release fetch (which 404s for pre-publish alphas).
         "evo install claude-code --from-path /opt/evo; "
-        # Defensive fallback for the evo-hook-drain binary. The CLAUDE_CONFIG_DIR
-        # bug in evo<=0.4.4 silently skips ensure_hook_drain_binary when the cache
-        # is outside ~/.claude, breaking `evo direct` delivery. Our runtime-pull
-        # picks up the upstream fix, but stage the binary anyway: detects the
-        # actually-installed plugin version and target arch -- works for whatever
-        # version is on PATH, doesn't break when the version bumps.
-        'PLUGIN_VER_DIR=$(ls -1dt "$CLAUDE_CONFIG_DIR"/plugins/cache/evo-hq-evo/evo/*/ 2>/dev/null | head -1); '
-        'if [ -n "$PLUGIN_VER_DIR" ] && [ ! -x "$PLUGIN_VER_DIR/bin/evo-hook-drain" ]; then '
-        '  VER=$(basename "${PLUGIN_VER_DIR%/}"); '
-        '  ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) T=linux-amd64;; aarch64|arm64) T=linux-arm64;; *) T="";; esac; '
-        '  if [ -n "$T" ]; then '
-        '    mkdir -p "$PLUGIN_VER_DIR/bin"; '
-        '    URL="https://github.com/evo-hq/evo/releases/download/v${VER}/evo-hook-drain-${T}"; '
-        '    echo "[hook-drain fallback] fetching $URL"; '
-        '    curl -fsSL -o "$PLUGIN_VER_DIR/bin/evo-hook-drain" "$URL" && chmod +x "$PLUGIN_VER_DIR/bin/evo-hook-drain" '
-        '      && echo "[hook-drain fallback] staged at $PLUGIN_VER_DIR/bin/evo-hook-drain" '
-        '      || echo "[hook-drain fallback] WARN: fetch failed -- evo direct will not work"; '
-        '  fi; '
-        'fi; '
         f"cd \"$REPO\" && bash scripts/run.sh run {task} {model} {hours}"
     )
 
