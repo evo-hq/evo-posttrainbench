@@ -20,7 +20,7 @@ read -rp "Persistent workspace dir [/home/ptb]: " WORK <"$TTY"; WORK="${WORK:-/h
 mkdir -p "$WORK"; export WORK
 
 # 2. repo (use current checkout if we're in it, else clone into the workspace)
-if [ -f scripts/run_evo_jarvislabs.sh ]; then
+if [ -f scripts/run.sh ]; then
   REPO="$(pwd)"
 else
   REPO="$WORK/repo"
@@ -29,25 +29,18 @@ fi
 cd "$REPO"
 info "repo: $REPO   workspace: $WORK"
 
-# 3. install (deps, vLLM, inspect_evals, evo from feat/model-update, claude-code, socat)
+# 3. install (deps, vLLM, inspect_evals, evo from feat/model-update, claude-code)
 read -rp "Run install/bootstrap now? [Y/n]: " yn <"$TTY"
-[ "${yn:-Y}" = "n" ] || WORK="$WORK" bash scripts/run_evo_jarvislabs.sh bootstrap
+[ "${yn:-Y}" = "n" ] || WORK="$WORK" bash scripts/run.sh bootstrap
 
-# 4. Claude auth (idempotent)
+# 4. Claude auth -- Max subscription / OAuth (the path the experiment uses)
 touch "$WORK/.env"; chmod 600 "$WORK/.env"
-if [ -f "$WORK/oauth_token" ] || grep -q '^ANTHROPIC_API_KEY=' "$WORK/.env"; then
-  info "Claude auth already configured -- skipping"
+if [ -f "$WORK/oauth_token" ]; then
+  info "Claude OAuth token already at $WORK/oauth_token -- skipping"
 else
-  info "Claude auth: [1] OAuth / Max subscription   [2] API key"
-  read -rp "choose [1]: " a <"$TTY"
-  if [ "${a:-1}" = "2" ]; then
-    read -rsp "paste ANTHROPIC_API_KEY: " k <"$TTY"; echo
-    echo "ANTHROPIC_API_KEY=$k" >> "$WORK/.env"
-  else
-    echo "  (run 'claude setup-token' on your laptop first)"
-    read -rsp "paste the OAuth token: " t <"$TTY"; echo
-    printf '%s' "$t" > "$WORK/oauth_token"; chmod 600 "$WORK/oauth_token"
-  fi
+  info "Claude Code OAuth: run 'claude setup-token' on your laptop, then paste the token here."
+  read -rsp "paste the OAuth token: " t <"$TTY"; echo
+  printf '%s' "$t" > "$WORK/oauth_token"; chmod 600 "$WORK/oauth_token"
 fi
 
 # 5. other secrets (idempotent)
@@ -64,8 +57,8 @@ python -c "import torch, vllm, trl, inspect_evals.aime2025; print('deps ok:', to
 info "Setup done. Run it (inside tmux):"
 cat <<EOF
   tmux new -s ptb
-  WORK=$WORK bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B-Base 1     # 1h smoke
-  WORK=$WORK bash scripts/run_evo_jarvislabs.sh run aime2025 Qwen/Qwen3-4B-Base 10
-  WORK=$WORK bash scripts/run_evo_jarvislabs.sh run aime2025 google/gemma-3-4b-pt 10
-  WORK=$WORK bash scripts/run_evo_jarvislabs.sh dashboard    # then open port 8090 on the instance
+  WORK=$WORK bash scripts/run.sh run aime2025 Qwen/Qwen3-4B-Base 1     # 1h smoke
+  WORK=$WORK bash scripts/run.sh run aime2025 Qwen/Qwen3-4B-Base 10
+  WORK=$WORK bash scripts/run.sh run aime2025 google/gemma-3-4b-pt 10
+  WORK=$WORK bash scripts/run.sh dashboard    # standalone; or just open port 8080 on the instance
 EOF

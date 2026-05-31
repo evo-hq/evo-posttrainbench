@@ -1,15 +1,13 @@
 #!/bin/bash
-# Apptainer-free PostTrainBench runner for a single rented H100 (e.g. JarvisLabs),
-# running the evo variant: Claude Code + evo plugin + finetuning skill, on OAuth.
+# Apptainer-free PostTrainBench runner for a single H100 host -- works on a rented
+# instance (JarvisLabs/RunPod) or inside a Modal container. Runs the agent + the
+# evaluate.py directly on the host (their src/run_task.sh wraps everything in
+# apptainer .sif images, which is painful inside an already-containerized cloud GPU).
+# Deliberately skips the contamination judge and the fuse-overlayfs HF isolation,
+# and does a single eval pass -- SMOKE-TEST one cell before trusting any number.
 #
-# Their src/run_task.sh wraps everything in apptainer .sif images, which is painful
-# inside an already-containerized cloud GPU. This runs the same core logic directly
-# on the host. It deliberately does NOT replicate the contamination judge or the
-# fuse-overlayfs HF isolation -- for our own experiment we run the agent and
-# evaluate.py directly. SMOKE-TEST one cell before trusting any number.
-#
-# Layout: everything lives under $WORK (default /home/<user>/ptb) so it survives a
-# JarvisLabs pause (/home is persistent; /root is wiped).
+# Layout: everything lives under $WORK (default /home/<user>/ptb on JarvisLabs;
+# /workspace inside Modal). Persisted there across pauses / function calls.
 set -euo pipefail
 
 CMD="${1:-help}"
@@ -31,7 +29,6 @@ bootstrap() {
   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
   command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs; }
-  command -v socat >/dev/null || apt-get install -y socat   # to expose the dashboard port
   npm install -g @anthropic-ai/claude-code@2.1.76          # match the version they ran
 
   # PostTrainBench starting environment (pinned) + vLLM + flash-attn
@@ -72,6 +69,11 @@ run() {
     echo "no Claude auth: create $OAUTH_TOKEN_FILE (claude setup-token) or set ANTHROPIC_API_KEY in $WORK/.env"; exit 1
   fi
 
+  # Bind evo's auto-started dashboard to 0.0.0.0 so it's reachable on the cloud
+  # instance / Modal web URL (requires evo >= the EVO_DASHBOARD_HOST commit).
+  export EVO_DASHBOARD_HOST="${EVO_DASHBOARD_HOST:-0.0.0.0}"
+  export EVO_DASHBOARD_PORT="${EVO_DASHBOARD_PORT:-8080}"
+
   local RUN JOB
   RUN="$WORK/runs/${AGENT}_${TASK}_$(echo "$MODEL" | tr '/:' '__')_$(date +%s)"
   JOB="$RUN/task"; mkdir -p "$JOB"
@@ -110,12 +112,13 @@ run() {
 }
 
 dashboard() {
-  # evo's dashboard binds 127.0.0.1 only; bridge it to 0.0.0.0 so the port can be
-  # opened on the cloud instance. Open PUBLIC_PORT on JarvisLabs to reach it.
-  local PUBLIC="${PUBLIC_PORT:-8090}" INTERNAL="${EVO_DASH_PORT:-8080}"
-  command -v socat >/dev/null || { echo "socat missing -- run bootstrap"; exit 1; }
-  echo "exposing evo dashboard 127.0.0.1:$INTERNAL -> 0.0.0.0:$PUBLIC (open port $PUBLIC on the instance)"
-  exec socat "TCP-LISTEN:${PUBLIC},fork,reuseaddr" "TCP:127.0.0.1:${INTERNAL}"
+  # Standalone dashboard against the latest run dir (during a run, evo auto-starts
+  # one inside the agent's session bound to 0.0.0.0:8080 via EVO_DASHBOARD_HOST).
+  local LATEST
+  LATEST=$(ls -1dt "$WORK"/runs/*/task 2>/dev/null | head -1)
+  [ -n "$LATEST" ] || { echo "no runs under $WORK/runs yet"; exit 1; }
+  echo "evo dashboard for $LATEST on 0.0.0.0:8080 (open port 8080 on the instance)"
+  ( cd "$LATEST" && EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 exec evo dashboard )
 }
 
 case "$CMD" in
