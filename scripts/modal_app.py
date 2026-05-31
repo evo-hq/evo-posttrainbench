@@ -188,6 +188,32 @@ def dry_run():
     print("\nALL OK -- safe to invoke train()", flush=True)
 
 
+@app.function(timeout=60, **COMMON)
+def link_latest_run():
+    """Symlink /workspace/.evo -> the agent's latest run's .evo so the
+    dashboard (rooted at /workspace when it cold-started before any runs
+    existed) actually sees the project.
+
+    Idempotent: re-runnable anytime; updates the symlink to point at the
+    newest run dir each time.
+
+    Usage: `modal run scripts/modal_app.py::link_latest_run`
+    """
+    import subprocess
+    subprocess.run(["bash", "-c", r"""
+        set -eu
+        LATEST=$(ls -1dt /workspace/runs/*/task 2>/dev/null | head -1 || true)
+        if [ -z "$LATEST" ] || [ ! -d "$LATEST/.evo" ]; then
+            echo "no run with .evo/ found under /workspace/runs/*/task -- nothing to link"
+            exit 1
+        fi
+        ln -snf "$LATEST/.evo" /workspace/.evo
+        echo "linked /workspace/.evo -> $LATEST/.evo"
+        ls -la /workspace/.evo
+    """], check=True)
+    vol.commit()
+
+
 @app.function(scaledown_window=1200, **COMMON)
 @modal.concurrent(max_inputs=100)
 @modal.web_server(port=8080, startup_timeout=180)
