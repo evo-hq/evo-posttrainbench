@@ -103,6 +103,12 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
     return (
         "set -euo pipefail; "
         "cd /opt/ptb && git pull --ff-only origin main; "                  # always run the latest scripts
+        # CLI is in the image but the layer is cached -- pull + reinstall so the
+        # `evo` on PATH matches the marketplace plugin version (which `evo install`
+        # below pulls fresh). Without this, CLI drifts behind and the discover
+        # skill's version-match gate fails.
+        f"cd /opt/evo && git pull --ff-only origin {EVO_BRANCH} && "
+        "uv tool install --reinstall --editable /opt/evo/plugins/evo; "
         "export WORK=/workspace REPO=/opt/ptb "
         "HF_HOME=/workspace/hf CLAUDE_CONFIG_DIR=/workspace/.claude "
         "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 "
