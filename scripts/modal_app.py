@@ -190,16 +190,23 @@ def dry_run():
 
 @app.function(scaledown_window=1200, **COMMON)
 @modal.concurrent(max_inputs=100)
-@modal.web_server(port=8080)
+@modal.web_server(port=8080, startup_timeout=180)
 def dashboard():
     """Public HTTPS dashboard against the latest run dir on the Volume.
-    URL: https://<workspace>--<app>-dashboard.modal.run"""
+    URL: https://<workspace>--<app>-dashboard.modal.run
+
+    startup_timeout=180 to absorb the CLI refresh (~30s) + Flask startup.
+    Uses `evo-dashboard` (the direct entry from pyproject -- evo.dashboard:main)
+    instead of `evo dashboard` (which goes through a supervisor + DEVNULL'd
+    subprocesses, defeating env-var debugging). evo-dashboard reads
+    EVO_DASHBOARD_HOST/PORT directly and binds Flask once.
+    """
     cmd = (
-        "set -euo pipefail; "
+        "set -eu; "                                                         # no pipefail: LATEST=$(ls|head) trips it
         + _REFRESH_EVO_CLI +
-        "LATEST=$(ls -1dt /workspace/runs/*/task 2>/dev/null | head -1); "
-        '[ -z "$LATEST" ] && LATEST=/workspace; '
+        "LATEST=$(ls -1dt /workspace/runs/*/task 2>/dev/null | head -1 || true); "
+        ': "${LATEST:=/workspace}"; '                                       # POSIX default-assignment
         'cd "$LATEST" && '
-        "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 exec evo dashboard"
+        "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 exec evo-dashboard"
     )
     subprocess.Popen(["bash", "-lc", cmd])
