@@ -33,7 +33,7 @@ image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04", add_python="3.10"
     )
-    .apt_install("git", "curl", "build-essential", "tmux", "tree", "jq")
+    .apt_install("git", "curl", "build-essential", "tmux", "tree")
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
@@ -74,28 +74,22 @@ image = (
         "&& uv pip install --system --no-cache .",
     )
     # evo from our branch -- last so flipping the branch only re-runs this layer.
-    # Fetch the evo-hook-drain binary from the LATEST GitHub release that has
-    # one for our platform. Walks both stable and pre-release tags via the GH
-    # API, picks the newest with an asset matching evo-hook-drain-linux-amd64.
-    # This avoids needing rustc/cargo in the image (the binary's wire protocol
-    # is stable enough that a slightly-older binary works with the local CLI).
-    # If GH is unreachable or no release has the asset, the env var stays unset
-    # and ensure_hook_drain_binary falls back to its own fetch logic at install.
+    # Fetch the evo-hook-drain binary from GitHub's /releases/latest/ redirect.
+    # That URL always points at the LATEST STABLE release's asset, no API call
+    # or jq needed. The binary's wire protocol is stable enough across minor
+    # versions that an older-stable binary works fine with a newer/alpha CLI.
+    # If the fetch 404s (no release has the asset for our arch), the env var
+    # is set to a non-existent path -- ensure_hook_drain_binary falls back to
+    # its own fetch logic at install, and if that fails too, evo direct just
+    # doesn't work for this run (train function continues fine without it).
     .run_commands(
         f"git clone -b {EVO_BRANCH} https://github.com/evo-hq/evo.git /opt/evo "
         "&& uv tool install --editable /opt/evo/plugins/evo "
-        '&& T=evo-hook-drain-linux-amd64 '
-        '&& TAG=$(curl -fsSL https://api.github.com/repos/evo-hq/evo/releases '
-        '         | jq -r --arg t "$T" \'[.[] | select(.assets[]?.name == $t) | .tag_name] | .[0] // empty\') '
-        '&& if [ -n "$TAG" ]; then '
-        '     echo "[hook-drain] fetching $T from release $TAG"; '
-        '     curl -fsSL -o /opt/evo-hook-drain '
-        '       "https://github.com/evo-hq/evo/releases/download/${TAG}/${T}" '
-        '     && chmod +x /opt/evo-hook-drain '
-        '     && echo "[hook-drain] staged at /opt/evo-hook-drain"; '
-        '   else '
-        '     echo "[hook-drain] WARN: no GH release has $T -- evo direct may not work"; '
-        '   fi',
+        "&& (curl -fsSL -o /opt/evo-hook-drain "
+        "    https://github.com/evo-hq/evo/releases/latest/download/evo-hook-drain-linux-amd64 "
+        "    && chmod +x /opt/evo-hook-drain "
+        "    && echo '[hook-drain] staged from /releases/latest/download/') "
+        "   || echo '[hook-drain] WARN: latest-release fetch failed; evo direct may not work'",
     )
     .env({
         "PATH": "/root/.local/bin:/usr/local/bin:/usr/bin:/bin",
