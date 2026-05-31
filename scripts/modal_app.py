@@ -102,6 +102,7 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
     (idempotent) and runs the same scripts/run.sh used on JarvisLabs."""
     return (
         "set -euo pipefail; "
+        "cd /opt/ptb && git pull --ff-only origin main; "                  # always run the latest scripts
         "export WORK=/workspace REPO=/opt/ptb "
         "HF_HOME=/workspace/hf CLAUDE_CONFIG_DIR=/workspace/.claude "
         "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 "
