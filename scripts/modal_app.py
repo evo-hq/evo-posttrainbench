@@ -126,6 +126,25 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
         'TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"; '
         "mkdir -p \"$HF_HOME\" \"$CLAUDE_CONFIG_DIR\"; "
         "evo install claude-code; "                                        # idempotent
+        # Defensive fallback for the evo-hook-drain binary. The CLAUDE_CONFIG_DIR
+        # bug in evo<=0.4.4 silently skips ensure_hook_drain_binary when the cache
+        # is outside ~/.claude, breaking `evo direct` delivery. Our runtime-pull
+        # picks up the upstream fix, but stage the binary anyway: detects the
+        # actually-installed plugin version and target arch -- works for whatever
+        # version is on PATH, doesn't break when the version bumps.
+        'PLUGIN_VER_DIR=$(ls -1dt "$CLAUDE_CONFIG_DIR"/plugins/cache/evo-hq-evo/evo/*/ 2>/dev/null | head -1); '
+        'if [ -n "$PLUGIN_VER_DIR" ] && [ ! -x "$PLUGIN_VER_DIR/bin/evo-hook-drain" ]; then '
+        '  VER=$(basename "${PLUGIN_VER_DIR%/}"); '
+        '  ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) T=linux-amd64;; aarch64|arm64) T=linux-arm64;; *) T="";; esac; '
+        '  if [ -n "$T" ]; then '
+        '    mkdir -p "$PLUGIN_VER_DIR/bin"; '
+        '    URL="https://github.com/evo-hq/evo/releases/download/v${VER}/evo-hook-drain-${T}"; '
+        '    echo "[hook-drain fallback] fetching $URL"; '
+        '    curl -fsSL -o "$PLUGIN_VER_DIR/bin/evo-hook-drain" "$URL" && chmod +x "$PLUGIN_VER_DIR/bin/evo-hook-drain" '
+        '      && echo "[hook-drain fallback] staged at $PLUGIN_VER_DIR/bin/evo-hook-drain" '
+        '      || echo "[hook-drain fallback] WARN: fetch failed -- evo direct will not work"; '
+        '  fi; '
+        'fi; '
         f"cd \"$REPO\" && bash scripts/run.sh run {task} {model} {hours}"
     )
 
@@ -186,6 +205,32 @@ def dry_run():
     subprocess.run(["evo", "--version"], check=True)
 
     print("\nALL OK -- safe to invoke train()", flush=True)
+
+
+@app.function(timeout=120, **COMMON)
+def evo_direct(message: str):
+    """Inject an `evo direct` user-authoritative directive into the running
+    agent's session. Wraps the message in the [EVO DIRECTIVE] banner via the
+    inject mechanism; the running agent sees it as a new user turn on its
+    next hook fire.
+
+    Usage: `modal run scripts/modal_app.py::evo_direct --message "<text>"`
+    """
+    import shlex
+    import subprocess
+    quoted = shlex.quote(message)
+    subprocess.run(["bash", "-c", f"""
+        set -eu
+        LATEST=$(ls -1dt /workspace/runs/*/task 2>/dev/null | head -1 || true)
+        if [ -z "$LATEST" ] || [ ! -d "$LATEST/.evo" ]; then
+            echo "no run with .evo/ under /workspace/runs/*/task"
+            exit 1
+        fi
+        cd "$LATEST"
+        echo "broadcasting directive into $LATEST/.evo/"
+        evo direct {quoted}
+    """], check=True)
+    vol.commit()
 
 
 @app.function(timeout=60, **COMMON)
