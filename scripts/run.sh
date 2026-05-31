@@ -115,13 +115,26 @@ run() {
 }
 EOF
 
-  # prompt = PostTrainBench's standard task prompt + an evo-engagement preamble
-  local BASE EVO_PRE PROMPT
+  # prompt = imperative evo-engagement preamble + PostTrainBench's standard task prompt
+  local BASE BENCH_NAME EVO_PRE PROMPT
   BASE=$(python src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
-  EVO_PRE="Use evo to structure this work: initialise evo here, treat evaluate.py as the benchmark/gate, and run the optimize loop -- propose post-training experiments, score each on a held-out split you carve from training data (NEVER the test set), and keep what improves. Load the 'finetuning' skill for method and diagnostics judgment; take the LOCAL training path (this box's TRL/PEFT + vLLM serving) since no managed service is available. For training metrics use trackio (installed; wandb-API-compatible -- 'import trackio as wandb; wandb.init(project=\"ptb\", space_id=os.environ[\"TRACKIO_SPACE_ID\"])'), which logs to a free HF Space; do not use real W&B. final_model is evo's best gate-passing checkpoint. Obey every rule below.
+  BENCH_NAME=$(tr -d '\n' < "src/eval/tasks/$TASK/benchmark.txt")
+  EVO_PRE=$(cat <<EOF
+You MUST orchestrate this run via evo (the plugin is already installed in this Claude Code session). Before writing any training code or calling evaluate.py directly, you MUST do these two actions in order:
 
-"
-  PROMPT="${EVO_PRE}${BASE}"
+1. Invoke the **evo:discover** skill, seeded with this description: "improve ${MODEL} on ${BENCH_NAME} via post-training; the benchmark is ./evaluate.py (already provided -- do not modify per rule 4); curate training data from public sources only, NEVER ${BENCH_NAME} test data (per rule 3); only fine-tune ${MODEL} (per rule 7); final_model must be the best gate-passing checkpoint." Let discover construct the baseline + gates and run the first experiment before you do anything else.
+
+2. Then invoke the **evo:optimize** skill with parameters \`subagents=1\` (one H100 = one GPU training job at a time; use subagent parallelism only for non-GPU work like data curation/analysis). Let the optimize loop propose post-training experiments, train, score each on the held-out split, and keep what improves. Pick \`budget\` and \`stall\` appropriate to your remaining time (check with \`bash timer.sh\`).
+
+3. While the optimize loop runs, follow the **finetuning** skill for method and diagnostic judgment. Take the LOCAL training path (this box's TRL/PEFT + vLLM serving; no managed service is available). Log training metrics via trackio (installed; wandb-API-compatible -- 'import trackio as wandb; wandb.init(project="ptb", space_id=os.environ["TRACKIO_SPACE_ID"])').
+
+\`final_model/\` at the end must be evo's best gate-passing checkpoint. Do NOT skip the evo:discover and evo:optimize steps -- that is the whole point of this agent variant. Obey every PostTrainBench rule below.
+
+EOF
+)
+  PROMPT="${EVO_PRE}
+
+${BASE}"
   printf '%s' "$PROMPT" > "$RUN/prompt.txt"
 
   # run the agent directly (no apptainer), bounded by the hour budget
