@@ -81,6 +81,10 @@ run() {
   # instance / Modal web URL (requires evo >= the EVO_DASHBOARD_HOST commit).
   export EVO_DASHBOARD_HOST="${EVO_DASHBOARD_HOST:-0.0.0.0}"
   export EVO_DASHBOARD_PORT="${EVO_DASHBOARD_PORT:-8080}"
+  # Sandbox-mode escape hatch: cloud containers run as root by default, and
+  # claude --dangerously-skip-permissions otherwise refuses root. The whole
+  # container IS the sandbox, so this is the intended use.
+  export IS_SANDBOX="${IS_SANDBOX:-1}"
   # trackio: free, OSS, wandb-API-compatible -- logs to a HF Space for live curves
   export TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"
 

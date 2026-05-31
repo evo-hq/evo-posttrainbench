@@ -106,6 +106,7 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
         "export WORK=/workspace REPO=/opt/ptb "
         "HF_HOME=/workspace/hf CLAUDE_CONFIG_DIR=/workspace/.claude "
         "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 "
+        "IS_SANDBOX=1 "                                                    # claude --dangerously-skip-permissions otherwise rejects root
         'TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"; '
         "mkdir -p \"$HF_HOME\" \"$CLAUDE_CONFIG_DIR\"; "
         "evo install claude-code; "                                        # idempotent
