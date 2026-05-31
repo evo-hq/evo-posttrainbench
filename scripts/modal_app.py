@@ -284,15 +284,16 @@ def directive_smoke(token: str = "PINEAPPLE_42"):
         ls -la "$PLUGIN_VER_DIR/bin/" 2>/dev/null || true
         echo "[smoke] hook-drain present: $([ -x "$PLUGIN_VER_DIR/bin/evo-hook-drain" ] && echo YES || echo NO)"
 
-        # 3. Fresh workspace
+        # 3. Fresh workspace -- evo init only RECORDS the benchmark command,
+        # doesn't execute it (execution happens in evo run, which we don't
+        # invoke here). So a placeholder benchmark string is fine.
         SMOKE_DIR=/workspace/smoke_$(date +%s)
         mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"
-        # Need a target file and a benchmark that exits 0 -- evo init validates structure.
+        git init -q && git config user.email smoke@evo.test && git config user.name smoke
         echo "print('hi')" > target.py
-        echo '#!/bin/sh' > bench.sh && echo 'echo \\'{{"score":0}}\\' > "$EVO_RESULT_PATH"' >> bench.sh
-        chmod +x bench.sh
+        git add -A && git commit -qm initial
         evo init --name "directive-smoke" --target target.py \
-            --benchmark "bash {{worktree}}/bench.sh" --metric max \
+            --benchmark "true" --metric max \
             --host claude-code --instrumentation-mode inline 2>&1 | tail -5
 
         # 4. Background: sleep 30, then fire directive
