@@ -32,7 +32,9 @@ bootstrap() {
   npm install -g @anthropic-ai/claude-code@2.1.76          # match the version they ran
 
   # PostTrainBench starting environment (pinned) + vLLM + flash-attn
-  uv pip install --system --no-cache vllm==0.11.0 --torch-backend=auto
+  # Pin to cu128: --torch-backend=auto fails during builds with no GPU attached
+  # (e.g. Modal image builds); cu128 wheels are compatible with our cuda:12.9.1 base.
+  uv pip install --system --no-cache vllm==0.11.0 --torch-backend=cu128
   uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
   uv pip install --system --no-cache trackio   # wandb-API-compatible OSS tracker; logs to a HF Space
   uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation

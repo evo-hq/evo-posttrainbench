@@ -44,8 +44,10 @@ image = (
     # + agents/claude_evo_max + src/eval/*.
     .run_commands("git clone https://github.com/evo-hq/evo-posttrainbench.git /opt/ptb")
     # PostTrainBench's pinned starting env + vLLM + flash-attn
+    # `--torch-backend=auto` fails during a Modal image build because there's no
+    # GPU at build time for uv to detect; pin to cu128 (matches our 12.9.1 base).
     .run_commands(
-        "uv pip install --system --no-cache vllm==0.11.0 --torch-backend=auto",
+        "uv pip install --system --no-cache vllm==0.11.0 --torch-backend=cu128",
     )
     .run_commands(
         "uv pip install --system --no-cache -r /opt/ptb/containers/requirements-direct.txt",
