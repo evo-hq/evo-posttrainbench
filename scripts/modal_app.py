@@ -52,8 +52,11 @@ image = (
     .run_commands(
         "uv pip install --system --no-cache -r /opt/ptb/containers/requirements-direct.txt",
     )
-    # trackio: wandb-API-compatible OSS tracker, free, logs to an HF Space
-    .run_commands("uv pip install --system --no-cache trackio")
+    # trackio: wandb-API-compatible OSS tracker; logs to a HF Space.
+    # Pin <0.10 -- trackio 0.10+ requires gradio 6 + huggingface-hub>=1.0, which
+    # conflicts with PostTrainBench's pinned transformers 4.57.3 (needs hf-hub<1.0).
+    # 0.4.0-0.9.0 explicitly declare huggingface-hub<1.0.0 and gradio 5.x.
+    .run_commands("uv pip install --system --no-cache 'trackio<0.10'")
     # flash-attn doesn't declare wheel as a build dep, so --no-build-isolation
     # fails without wheel pre-installed.
     .run_commands(
@@ -161,7 +164,7 @@ def dry_run():
     print("\nALL OK -- safe to invoke train()", flush=True)
 
 
-@app.function(min_containers=1, scaledown_window=1200, **COMMON)
+@app.function(scaledown_window=1200, **COMMON)
 @modal.concurrent(max_inputs=100)
 @modal.web_server(port=8080)
 def dashboard():

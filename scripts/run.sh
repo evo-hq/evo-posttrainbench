@@ -36,7 +36,10 @@ bootstrap() {
   # (e.g. Modal image builds); cu128 wheels are compatible with our cuda:12.9.1 base.
   uv pip install --system --no-cache vllm==0.11.0 --torch-backend=cu128
   uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
-  uv pip install --system --no-cache trackio   # wandb-API-compatible OSS tracker; logs to a HF Space
+  # trackio: wandb-API-compatible OSS tracker; logs to a HF Space.
+  # Pin <0.10 -- 0.10+ requires gradio 6 + huggingface-hub>=1.0, conflicts with
+  # PostTrainBench's pinned transformers 4.57.3 (needs hf-hub<1.0).
+  uv pip install --system --no-cache 'trackio<0.10'
   # wheel needed for flash-attn's --no-build-isolation (it doesn't declare wheel as a build dep)
   uv pip install --system --no-cache wheel setuptools
   uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation
