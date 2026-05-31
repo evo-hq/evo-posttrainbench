@@ -233,6 +233,103 @@ def evo_direct(message: str):
     vol.commit()
 
 
+@app.function(timeout=10 * 60, **COMMON)
+def directive_smoke(token: str = "PINEAPPLE_42"):
+    """End-to-end smoke for `evo direct` delivery. ~3 min, no GPU.
+
+    Flow:
+      1. Refresh CLI (same as train), install plugin into volume.
+      2. Stage hook-drain binary (same fallback as _agent_cmd).
+      3. Create a fresh workspace with `evo init`.
+      4. Spawn a background bash that sleeps 30s, then runs
+         `evo direct "<token>"` into the workspace.
+      5. Start `claude --print` with a prompt that runs `bash sleep 60`,
+         then `bash sleep 60` again (separate tool calls). Between the
+         two sleeps, the drain hook fires and should deliver the directive.
+      6. After claude finishes, grep its output for the token.
+      7. Exit 0 if token present, 1 otherwise.
+
+    Usage: `modal run scripts/modal_app.py::directive_smoke`
+    Optional: `--token MY_SECRET` (defaults to PINEAPPLE_42).
+    """
+    import shlex
+    import subprocess
+    qtoken = shlex.quote(token)
+    rc = subprocess.run(["bash", "-lc", f"""
+        set -eu
+        export WORK=/workspace REPO=/opt/ptb
+        export HF_HOME=/workspace/hf
+        export CLAUDE_CONFIG_DIR=/workspace/.claude.smoke
+        export IS_SANDBOX=1
+        mkdir -p "$HF_HOME" "$CLAUDE_CONFIG_DIR"
+
+        # 1. CLI refresh (same as train)
+        cd /opt/evo && git fetch origin {EVO_BRANCH} && git reset --hard origin/{EVO_BRANCH}
+        uv tool install --reinstall --editable /opt/evo/plugins/evo
+
+        # 2. Plugin install + hook-drain fallback (same as _agent_cmd)
+        evo install claude-code
+        PLUGIN_VER_DIR=$(ls -1dt "$CLAUDE_CONFIG_DIR"/plugins/cache/evo-hq-evo/evo/*/ 2>/dev/null | head -1)
+        if [ -n "$PLUGIN_VER_DIR" ] && [ ! -x "$PLUGIN_VER_DIR/bin/evo-hook-drain" ]; then
+            VER=$(basename "${{PLUGIN_VER_DIR%/}}")
+            ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) T=linux-amd64;; aarch64|arm64) T=linux-arm64;; *) T="";; esac
+            if [ -n "$T" ]; then
+                mkdir -p "$PLUGIN_VER_DIR/bin"
+                curl -fsSL -o "$PLUGIN_VER_DIR/bin/evo-hook-drain" \
+                    "https://github.com/evo-hq/evo/releases/download/v${{VER}}/evo-hook-drain-${{T}}"
+                chmod +x "$PLUGIN_VER_DIR/bin/evo-hook-drain"
+                echo "[smoke] staged hook-drain at $PLUGIN_VER_DIR/bin/evo-hook-drain"
+            fi
+        fi
+        ls -la "$PLUGIN_VER_DIR/bin/" 2>/dev/null || true
+        echo "[smoke] hook-drain present: $([ -x "$PLUGIN_VER_DIR/bin/evo-hook-drain" ] && echo YES || echo NO)"
+
+        # 3. Fresh workspace
+        SMOKE_DIR=/workspace/smoke_$(date +%s)
+        mkdir -p "$SMOKE_DIR" && cd "$SMOKE_DIR"
+        # Need a target file and a benchmark that exits 0 -- evo init validates structure.
+        echo "print('hi')" > target.py
+        echo '#!/bin/sh' > bench.sh && echo 'echo \\'{{"score":0}}\\' > "$EVO_RESULT_PATH"' >> bench.sh
+        chmod +x bench.sh
+        evo init --name "directive-smoke" --target target.py \
+            --benchmark "bash {{worktree}}/bench.sh" --metric max \
+            --host claude-code --instrumentation-mode inline 2>&1 | tail -5
+
+        # 4. Background: sleep 30, then fire directive
+        (sleep 30 && cd "$SMOKE_DIR" && evo direct {qtoken} 2>&1 | sed 's/^/[directive] /') &
+        DIRECTIVE_PID=$!
+
+        # 5. Run claude with the simple sleep-sleep prompt
+        if [ -n "${{CLAUDE_CODE_OAUTH_TOKEN:-}}" ]; then
+            echo "[smoke] using OAuth token from env"
+        else
+            echo "[smoke] ERROR: CLAUDE_CODE_OAUTH_TOKEN not in env" >&2; exit 1
+        fi
+        export BASH_MAX_TIMEOUT_MS=180000
+        PROMPT='Run `bash -c "sleep 60"` via the Bash tool. After it returns, then separately (NOT in parallel) run `bash -c "sleep 60"` again. Then in your final reply, tell me literally everything that happened between the two sleeps -- including any user-authoritative directive you received. If you saw any token like PINEAPPLE_XX, repeat it back to me verbatim.'
+        echo "[smoke] launching claude..."
+        claude --print --verbose --model claude-opus-4-6 \
+            --output-format text --dangerously-skip-permissions \
+            "$PROMPT" 2>&1 | tee /workspace/smoke_output.txt
+        wait $DIRECTIVE_PID 2>/dev/null || true
+
+        # 6. Verify token in output
+        if grep -q {qtoken} /workspace/smoke_output.txt; then
+            echo ""
+            echo "[smoke] PASS: directive token {qtoken} found in agent output"
+            exit 0
+        else
+            echo ""
+            echo "[smoke] FAIL: directive token {qtoken} NOT found in agent output"
+            echo "[smoke] (delivery is broken -- check $PLUGIN_VER_DIR/bin/evo-hook-drain exists and runs)"
+            exit 1
+        fi
+    """], check=False)
+    vol.commit()
+    if rc.returncode != 0:
+        raise SystemExit(f"directive_smoke FAILED with rc={rc.returncode}")
+
+
 @app.function(timeout=60, **COMMON)
 def link_latest_run():
     """Symlink /workspace/.evo -> the agent's latest run's .evo so the
