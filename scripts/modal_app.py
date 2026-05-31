@@ -54,7 +54,10 @@ image = (
     )
     # trackio: wandb-API-compatible OSS tracker, free, logs to an HF Space
     .run_commands("uv pip install --system --no-cache trackio")
+    # flash-attn doesn't declare wheel as a build dep, so --no-build-isolation
+    # fails without wheel pre-installed.
     .run_commands(
+        "uv pip install --system --no-cache wheel setuptools",
         "uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation",
     )
     # AIME eval deps: inspect_evals registers the aime2025 task; the vllm-stdout

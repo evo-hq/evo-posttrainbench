@@ -37,6 +37,8 @@ bootstrap() {
   uv pip install --system --no-cache vllm==0.11.0 --torch-backend=cu128
   uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
   uv pip install --system --no-cache trackio   # wandb-API-compatible OSS tracker; logs to a HF Space
+  # wheel needed for flash-attn's --no-build-isolation (it doesn't declare wheel as a build dep)
+  uv pip install --system --no-cache wheel setuptools
   uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation
 
   # eval deps: inspect_evals registers the task (e.g. inspect_evals/aime2025); the
