@@ -50,6 +50,8 @@ image = (
     .run_commands(
         "uv pip install --system --no-cache -r /opt/ptb/containers/requirements-direct.txt",
     )
+    # trackio: wandb-API-compatible OSS tracker, free, logs to an HF Space
+    .run_commands("uv pip install --system --no-cache trackio")
     .run_commands(
         "uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation",
     )
@@ -94,7 +96,8 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
         "set -euo pipefail; "
         "export WORK=/workspace REPO=/opt/ptb "
         "HF_HOME=/workspace/hf CLAUDE_CONFIG_DIR=/workspace/.claude "
-        "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080; "
+        "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 "
+        'TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"; '
         "mkdir -p \"$HF_HOME\" \"$CLAUDE_CONFIG_DIR\"; "
         "evo install claude-code; "                                        # idempotent
         f"cd \"$REPO\" && bash scripts/run.sh run {task} {model} {hours}"

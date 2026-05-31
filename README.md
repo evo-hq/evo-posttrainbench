@@ -76,7 +76,8 @@ AIME 2025 × two base models: **`Qwen/Qwen3-4B-Base`** and **`google/gemma-3-4b-
 ## Monitor
 
 - **evo dashboard** (tree/scores/frontier/traces): served on `:8080`. `run.sh run` already exports `EVO_DASHBOARD_HOST=0.0.0.0` so evo's auto-started dashboard binds publicly — **open port 8080 on the instance** (JarvisLabs UI exposed ports) and browse the proxy URL. For a standalone view of the latest run: `bash scripts/run.sh dashboard`. SSH tunnel `ssh -L 8080:localhost:8080 <host>` works as a fallback.
-- **W&B** for training curves (survives pause, no tunnel); **`nvtop`** for the GPU.
+- **Trackio** (OSS, free, wandb-API-compatible) for training curves — the agent is instructed to log via `import trackio as wandb`. Logs sync to a HF Space (default `alok97/posttrain-runs`, override via `TRACKIO_SPACE_ID`); view at `https://huggingface.co/spaces/<id>`. Survives pause, no tunnel.
+- **`nvtop`** for the GPU.
 - Run inside `tmux` so it survives disconnect.
 
 ## Caveats — untested; smoke-test first

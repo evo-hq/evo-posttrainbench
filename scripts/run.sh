@@ -34,6 +34,7 @@ bootstrap() {
   # PostTrainBench starting environment (pinned) + vLLM + flash-attn
   uv pip install --system --no-cache vllm==0.11.0 --torch-backend=auto
   uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
+  uv pip install --system --no-cache trackio   # wandb-API-compatible OSS tracker; logs to a HF Space
   uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation
 
   # eval deps: inspect_evals registers the task (e.g. inspect_evals/aime2025); the
@@ -73,6 +74,8 @@ run() {
   # instance / Modal web URL (requires evo >= the EVO_DASHBOARD_HOST commit).
   export EVO_DASHBOARD_HOST="${EVO_DASHBOARD_HOST:-0.0.0.0}"
   export EVO_DASHBOARD_PORT="${EVO_DASHBOARD_PORT:-8080}"
+  # trackio: free, OSS, wandb-API-compatible -- logs to a HF Space for live curves
+  export TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"
 
   local RUN JOB
   RUN="$WORK/runs/${AGENT}_${TASK}_$(echo "$MODEL" | tr '/:' '__')_$(date +%s)"
@@ -88,7 +91,7 @@ run() {
   # prompt = PostTrainBench's standard task prompt + an evo-engagement preamble
   local BASE EVO_PRE PROMPT
   BASE=$(python src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
-  EVO_PRE="Use evo to structure this work: initialise evo here, treat evaluate.py as the benchmark/gate, and run the optimize loop -- propose post-training experiments, score each on a held-out split you carve from training data (NEVER the test set), and keep what improves. Load the 'finetuning' skill for method and diagnostics judgment; take the LOCAL training path (this box's TRL/PEFT + vLLM serving) since no managed service is available. final_model is evo's best gate-passing checkpoint. Obey every rule below.
+  EVO_PRE="Use evo to structure this work: initialise evo here, treat evaluate.py as the benchmark/gate, and run the optimize loop -- propose post-training experiments, score each on a held-out split you carve from training data (NEVER the test set), and keep what improves. Load the 'finetuning' skill for method and diagnostics judgment; take the LOCAL training path (this box's TRL/PEFT + vLLM serving) since no managed service is available. For training metrics use trackio (installed; wandb-API-compatible -- 'import trackio as wandb; wandb.init(project=\"ptb\", space_id=os.environ[\"TRACKIO_SPACE_ID\"])'), which logs to a free HF Space; do not use real W&B. final_model is evo's best gate-passing checkpoint. Obey every rule below.
 
 "
   PROMPT="${EVO_PRE}${BASE}"
