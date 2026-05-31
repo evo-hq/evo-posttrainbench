@@ -390,3 +390,20 @@ def dashboard():
         "EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 exec evo-dashboard"
     )
     subprocess.Popen(["bash", "-lc", cmd])
+
+    # Modal v2 volumes are not strictly read-after-write consistent across
+    # containers -- the dashboard's mount serves cached file content from
+    # before the train container's writes, so /api/graph etc. show stale
+    # state. evo-dashboard's load_graph() re-reads per request but Python's
+    # open() returns the cached bytes. vol.reload() flushes the mount cache.
+    # Background daemon polls every 5s while the server runs.
+    import threading
+    import time as _time
+    def _reload_loop():
+        while True:
+            _time.sleep(5)
+            try:
+                vol.reload()
+            except Exception:
+                pass
+    threading.Thread(target=_reload_loop, daemon=True).start()
