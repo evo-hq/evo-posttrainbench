@@ -78,9 +78,11 @@ vol = modal.Volume.from_name(f"{APP}-runs", create_if_missing=True, version=2)
 
 SECRETS = [
     modal.Secret.from_name("anthropic"),   # CLAUDE_CODE_OAUTH_TOKEN (Max subscription)
-    modal.Secret.from_name("hf"),          # HF_TOKEN
-    modal.Secret.from_name("wandb"),       # WANDB_API_KEY (optional)
+    modal.Secret.from_name("hf"),          # HF_TOKEN (accept gemma-3-4b-pt license on HF first)
 ]
+# Optional: for W&B training curves, create the secret and add it here:
+#   modal secret create wandb WANDB_API_KEY=...
+#   SECRETS.append(modal.Secret.from_name("wandb"))
 
 COMMON = dict(volumes={"/workspace": vol}, secrets=SECRETS)
 
@@ -141,7 +143,7 @@ def dry_run():
     if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         raise SystemExit("ERROR: CLAUDE_CODE_OAUTH_TOKEN missing -- the experiment uses Claude Code OAuth (Max subscription). "
                          "Run `claude setup-token` locally and add it to the `anthropic` Modal secret.")
-    for k in ("CLAUDE_CODE_OAUTH_TOKEN", "HF_TOKEN", "WANDB_API_KEY"):
+    for k in ("CLAUDE_CODE_OAUTH_TOKEN", "HF_TOKEN"):
         print(f"  {k}: {'set' if os.environ.get(k) else 'MISSING'}", flush=True)
 
     print("=== CLIs ===", flush=True)
