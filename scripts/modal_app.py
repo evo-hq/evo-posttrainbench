@@ -33,10 +33,7 @@ image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04", add_python="3.10"
     )
-    # `cargo` is for building evo's evo-hook-drain Rust binary at the
-    # last layer below; goes here (early/stable layer) so a branch flip
-    # doesn't reinstall Rust each time.
-    .apt_install("git", "curl", "build-essential", "tmux", "tree", "rustc", "cargo")
+    .apt_install("git", "curl", "build-essential", "tmux", "tree", "jq")
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
@@ -77,22 +74,34 @@ image = (
         "&& uv pip install --system --no-cache .",
     )
     # evo from our branch -- last so flipping the branch only re-runs this layer.
-    # Build the evo-hook-drain Rust binary in the same layer so it's present
-    # without depending on the GitHub release (which doesn't exist for pre-publish
-    # alphas). The runtime CLI refresh (_REFRESH_EVO_CLI in _agent_cmd) will
-    # rebuild this if the branch has new Rust source.
+    # Fetch the evo-hook-drain binary from the LATEST GitHub release that has
+    # one for our platform. Walks both stable and pre-release tags via the GH
+    # API, picks the newest with an asset matching evo-hook-drain-linux-amd64.
+    # This avoids needing rustc/cargo in the image (the binary's wire protocol
+    # is stable enough that a slightly-older binary works with the local CLI).
+    # If GH is unreachable or no release has the asset, the env var stays unset
+    # and ensure_hook_drain_binary falls back to its own fetch logic at install.
     .run_commands(
         f"git clone -b {EVO_BRANCH} https://github.com/evo-hq/evo.git /opt/evo "
         "&& uv tool install --editable /opt/evo/plugins/evo "
-        "&& cd /opt/evo/plugins/evo/bin/evo-hook-drain-rs "
-        "&& cargo build --release "
-        "&& cp target/release/evo-hook-drain /opt/evo-hook-drain",
+        '&& T=evo-hook-drain-linux-amd64 '
+        '&& TAG=$(curl -fsSL https://api.github.com/repos/evo-hq/evo/releases '
+        '         | jq -r --arg t "$T" \'[.[] | select(.assets[]?.name == $t) | .tag_name] | .[0] // empty\') '
+        '&& if [ -n "$TAG" ]; then '
+        '     echo "[hook-drain] fetching $T from release $TAG"; '
+        '     curl -fsSL -o /opt/evo-hook-drain '
+        '       "https://github.com/evo-hq/evo/releases/download/${TAG}/${T}" '
+        '     && chmod +x /opt/evo-hook-drain '
+        '     && echo "[hook-drain] staged at /opt/evo-hook-drain"; '
+        '   else '
+        '     echo "[hook-drain] WARN: no GH release has $T -- evo direct may not work"; '
+        '   fi',
     )
     .env({
         "PATH": "/root/.local/bin:/usr/local/bin:/usr/bin:/bin",
-        # ensure_hook_drain_binary checks this env var first -- bypasses the
-        # GitHub release fetch (which 404s for pre-publish alphas) by copying
-        # the local file we built at image time.
+        # ensure_hook_drain_binary checks this env var first -- bypasses its
+        # own per-version fetch (which 404s for pre-publish alphas) by copying
+        # the binary we already staged from the latest available release.
         "EVO_HOOK_DRAIN_BINARY": "/opt/evo-hook-drain",
     })
 )
@@ -124,14 +133,11 @@ COMMON = dict(volumes={"/workspace": vol}, secrets=SECRETS)
 _REFRESH_EVO_CLI = (
     f"cd /opt/evo && git fetch origin {EVO_BRANCH} && "
     f"git reset --hard origin/{EVO_BRANCH} && "
-    "uv tool install --reinstall --editable /opt/evo/plugins/evo && "
-    # Rebuild evo-hook-drain too if Rust source changed since the image
-    # was built. cargo is incremental, so this is fast (~1s) when nothing
-    # changed. EVO_HOOK_DRAIN_BINARY=/opt/evo-hook-drain (set in image env)
-    # is what `evo install claude-code` reads when staging the hook.
-    "cd /opt/evo/plugins/evo/bin/evo-hook-drain-rs && "
-    "cargo build --release --quiet && "
-    "cp target/release/evo-hook-drain /opt/evo-hook-drain; "
+    "uv tool install --reinstall --editable /opt/evo/plugins/evo; "
+    # The evo-hook-drain binary is staged at image build via a GitHub release
+    # fetch (latest tag with the asset for our platform). The binary is
+    # wire-compatible across minor versions, so we don't re-fetch on every
+    # CLI refresh -- only when the image is rebuilt.
 )
 
 
