@@ -125,7 +125,11 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
         "IS_SANDBOX=1 "                                                    # claude --dangerously-skip-permissions otherwise rejects root
         'TRACKIO_SPACE_ID="${TRACKIO_SPACE_ID:-alok97/posttrain-runs}"; '
         "mkdir -p \"$HF_HOME\" \"$CLAUDE_CONFIG_DIR\"; "
-        "evo install claude-code; "                                        # idempotent
+        # Install plugin from the LOCAL /opt/evo clone (feat/model-update tip)
+        # NOT from the public marketplace -- marketplace points at origin/main
+        # which lags behind feat/model-update. From-path uses the same source
+        # the CLI was built from, so skills + CLI versions stay in sync.
+        "evo install claude-code --from-path /opt/evo; "
         # Defensive fallback for the evo-hook-drain binary. The CLAUDE_CONFIG_DIR
         # bug in evo<=0.4.4 silently skips ensure_hook_drain_binary when the cache
         # is outside ~/.claude, breaking `evo direct` delivery. Our runtime-pull
