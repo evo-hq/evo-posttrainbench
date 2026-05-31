@@ -123,13 +123,19 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
     )
 
 
-@app.function(gpu="H100!", timeout=10 * 3600 + 600, **COMMON)
+@app.function(gpu="H100!", timeout=12 * 3600, **COMMON)
 def train(
     model: str = "Qwen/Qwen3-4B-Base",
     hours: int = 10,
     task: str = "aime2025",
 ):
     """Real run: the agent post-trains the base model on the task. ~10h on H100.
+
+    Modal wall-clock timeout is 12h (vs. the 10h agent budget) to absorb
+    container startup (~3min) + final eval (~5-10min for AIME 2025) plus
+    headroom. The agent's own timer.sh starts at solve.sh launch (run.sh:100)
+    so the 10h budget is wall-clock from when Claude actually starts, not
+    from container boot.
 
     `gpu="H100!"` pins H100 (without it Modal silently upgrades to H200, which
     changes pricing and may break flash-attn/vLLM pinned kernels).
