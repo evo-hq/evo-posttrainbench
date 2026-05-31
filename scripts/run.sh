@@ -73,8 +73,8 @@ run() {
 
   [ -f "$WORK/.env" ] && { set -a; source "$WORK/.env"; set +a; }
   export OAUTH_TOKEN_FILE="$WORK/oauth_token"
-  if [ ! -f "$OAUTH_TOKEN_FILE" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "no Claude auth: create $OAUTH_TOKEN_FILE (claude setup-token) or set ANTHROPIC_API_KEY in $WORK/.env"; exit 1
+  if [ ! -f "$OAUTH_TOKEN_FILE" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    echo "no Claude auth: set CLAUDE_CODE_OAUTH_TOKEN env (e.g. via Modal secret), create $OAUTH_TOKEN_FILE (claude setup-token), or set ANTHROPIC_API_KEY in $WORK/.env"; exit 1
   fi
 
   # Bind evo's auto-started dashboard to 0.0.0.0 so it's reachable on the cloud
