@@ -22,5 +22,20 @@ fi
 export BASH_MAX_TIMEOUT_MS="36000000"
 export CLAUDE_CODE_EFFORT_LEVEL="max"   # Opus 4.6 only
 
-claude --print --verbose --model "$AGENT_CONFIG" --output-format stream-json \
-    --dangerously-skip-permissions "$PROMPT"
+# Run claude with NO controlling tty. Background:
+# When solve.sh is invoked from a tmux pane (e.g. JarvisLabs, manual local
+# tmux), the pane has a controlling pty. `claude --print --verbose` plus the
+# tee pipeline in run.sh creates a multi-stage process group where claude's
+# foreground status flips during pipe setup. Once claude is in the background
+# of that pty, any stdout write triggers SIGTTOU and the process gets STOPPED
+# (state `T` in /proc/<pid>/status) -- silently, with no error -- and the run
+# hangs forever.
+# On Modal this never reproduced because subprocess.run gives the container
+# no tty at all. The fix makes solve.sh portable across both:
+#   - `setsid -w` creates a new session with NO controlling terminal; claude
+#     can never bump into a tty regardless of how the parent set things up.
+#   - `< /dev/null` closes stdin defensively; prevents any read-from-tty path.
+# Output still flows through stdout to the caller's tee pipeline as normal.
+exec setsid -w claude --print --verbose --model "$AGENT_CONFIG" \
+    --output-format stream-json --dangerously-skip-permissions "$PROMPT" \
+    < /dev/null
