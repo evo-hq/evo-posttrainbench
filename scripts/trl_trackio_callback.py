@@ -59,6 +59,31 @@ class TrackioCallback(TrainerCallback):
         trackio.init(project=project, name=run_name, space_id=space_id)
         self._trackio = trackio
 
+        # Bridge to evo dashboard: write the trackio Space URL into the
+        # experiment's traces dir so the dashboard can render a link + scrape
+        # the corresponding parquet for the live curve. EVO_TRACES_DIR is
+        # exported by `evo run` for the activity it spawned; absent if the
+        # user ran this script outside an evo experiment, which is fine.
+        traces_dir = os.environ.get("EVO_TRACES_DIR")
+        if traces_dir:
+            try:
+                os.makedirs(traces_dir, exist_ok=True)
+                url = f"https://huggingface.co/spaces/{space_id}"
+                # run_name lets the dashboard scope parquet rows; project tells
+                # it which parquet file inside the dataset.
+                payload = (
+                    f"url={url}\n"
+                    f"space_id={space_id}\n"
+                    f"project={project}\n"
+                    f"run_name={run_name or ''}\n"
+                )
+                with open(os.path.join(traces_dir, ".trackio_url"), "w") as f:
+                    f.write(payload)
+            except Exception:
+                # Dashboard surfacing is observability, not correctness. Never
+                # let a write failure here kill training.
+                pass
+
     def on_log(self, args, state, control, logs=None, **kwargs):
         if not logs:
             return
