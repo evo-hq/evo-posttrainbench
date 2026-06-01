@@ -54,8 +54,18 @@ bootstrap() {
     && ( cd "$INS/inspect_ai_vllm_stdout" && uv pip install --system --no-cache . )
 
   # evo from our branch + register the plugin (incl. the finetuning skill) into Claude Code
-  [ -d "$WORK/evo" ] || git clone -b "$EVO_BRANCH" https://github.com/evo-hq/evo.git "$WORK/evo"
-  uv tool install --editable "$WORK/evo/plugins/evo"
+  # On re-bootstrap (after a JL pause, etc.) $WORK/evo persists -- fetch + hard-reset to
+  # branch tip so we don't sit on a stale commit. uv tool install --editable below picks
+  # up the refreshed tree; --force re-creates the entry point shim if the tool was already
+  # installed from an older sha.
+  if [ -d "$WORK/evo/.git" ]; then
+    ( cd "$WORK/evo" && git fetch origin "$EVO_BRANCH" \
+        && git checkout "$EVO_BRANCH" \
+        && git reset --hard "origin/$EVO_BRANCH" )
+  else
+    git clone -b "$EVO_BRANCH" https://github.com/evo-hq/evo.git "$WORK/evo"
+  fi
+  uv tool install --force --editable "$WORK/evo/plugins/evo"
   # Install the plugin from the LOCAL evo clone (feat/model-update tip)
   # rather than the public marketplace -- the marketplace points at the
   # stable release tag (currently 0.4.4) which lags behind feat/model-update.
