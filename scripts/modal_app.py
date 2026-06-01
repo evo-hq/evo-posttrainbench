@@ -25,6 +25,7 @@ import modal
 
 APP = "evo-posttrainbench"
 EVO_BRANCH = "feat/model-update"
+PTB_BRANCH = "evo-variant"
 
 # Image: PostTrainBench's pinned starting env (matches containers/requirements-direct.txt
 # + their .def), plus Claude Code 2.1.76 and evo from our branch. Layer order goes
@@ -42,7 +43,7 @@ image = (
     )
     # This fork: clone for containers/requirements-direct.txt + scripts/run.sh
     # + agents/claude_evo_max + src/eval/*.
-    .run_commands("git clone https://github.com/evo-hq/evo-posttrainbench.git /opt/ptb")
+    .run_commands(f"git clone -b {PTB_BRANCH} https://github.com/evo-hq/evo-posttrainbench.git /opt/ptb")
     # PostTrainBench's pinned starting env + vLLM + flash-attn
     # `--torch-backend=auto` fails during a Modal image build because there's no
     # GPU at build time for uv to detect; pin to cu128 (matches our 12.9.1 base).
@@ -140,7 +141,7 @@ def _agent_cmd(task: str, model: str, hours: int) -> str:
     (idempotent) and runs the same scripts/run.sh used on JarvisLabs."""
     return (
         "set -euo pipefail; "
-        "cd /opt/ptb && git pull --ff-only origin main; "                  # always run the latest scripts
+        f"cd /opt/ptb && git fetch origin {PTB_BRANCH} && git reset --hard origin/{PTB_BRANCH}; "  # always run the latest scripts on our branch
         + _REFRESH_EVO_CLI +
         "export WORK=/workspace REPO=/opt/ptb "
         "HF_HOME=/workspace/hf CLAUDE_CONFIG_DIR=/workspace/.claude "
