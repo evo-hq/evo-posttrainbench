@@ -177,8 +177,19 @@ def train(
 
     `gpu="H100!"` pins H100 (without it Modal silently upgrades to H200, which
     changes pricing and may break flash-attn/vLLM pinned kernels).
+
+    Dashboard: opens a Modal tunnel to port 8080 inside THIS container, where
+    evo-dashboard runs (started by `evo init` in the agent's first turn). The
+    tunnel URL prints below as `DASHBOARD: https://...`; grep modal logs for
+    it. URL is stable for the lifetime of this train() call (~12h); a new URL
+    is issued on relaunch. Same-container reads eliminate the cross-container
+    Modal-volume cache staleness that the standalone dashboard() function
+    suffered from.
     """
-    subprocess.run(["bash", "-lc", _agent_cmd(task, model, hours)], check=True)
+    with modal.forward(8080) as tunnel:
+        print(f"DASHBOARD: {tunnel.url}", flush=True)
+        print(f"DASHBOARD: tunnel closes when train() exits (~{hours}h or sooner)", flush=True)
+        subprocess.run(["bash", "-lc", _agent_cmd(task, model, hours)], check=True)
     vol.commit()
 
 
@@ -391,14 +402,22 @@ def link_latest_run():
 @modal.concurrent(max_inputs=100)
 @modal.web_server(port=8080, startup_timeout=180)
 def dashboard():
-    """Public HTTPS dashboard against the latest run dir on the Volume.
-    URL: https://<workspace>--<app>-dashboard.modal.run
+    """Post-mortem dashboard, served from a separate container against the
+    Modal Volume. URL: https://<workspace>--<app>-dashboard.modal.run
+
+    For LIVE monitoring during a train() run, use the modal.forward tunnel
+    URL printed by train() (grep `DASHBOARD:` in its logs). The tunnel
+    serves from the same container that's writing, so reads are real-time.
+
+    This deployed function is useful after train() exits: the Volume has
+    been committed, no more concurrent writers, so a fresh container mount
+    sees consistent state. Redeploy (`modal deploy scripts/modal_app.py`)
+    if the mount goes stale; vol.reload() does not fully flush Modal v2
+    mount caches across containers.
 
     startup_timeout=180 to absorb the CLI refresh (~30s) + Flask startup.
-    Uses `evo-dashboard` (the direct entry from pyproject -- evo.dashboard:main)
-    instead of `evo dashboard` (which goes through a supervisor + DEVNULL'd
-    subprocesses, defeating env-var debugging). evo-dashboard reads
-    EVO_DASHBOARD_HOST/PORT directly and binds Flask once.
+    Uses `evo-dashboard` directly (not `evo dashboard`) because the latter
+    DEVNULLs subprocess output, hiding env-var debugging.
     """
     cmd = (
         "set -eu; "                                                         # no pipefail: LATEST=$(ls|head) trips it
