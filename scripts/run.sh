@@ -130,7 +130,16 @@ You MUST orchestrate this run via evo (the plugin is already installed in this C
 
 2. Then invoke the evo:optimize skill. Let the optimize loop propose post-training experiments, train, score each on a held-out split it carves, and keep what improves. Pick parameters appropriate to your remaining time (check via bash timer.sh) and your compute.
 
-3. While the optimize loop runs, follow the finetuning skill for method and diagnostic judgment. Take the LOCAL training path (TRL/PEFT and vLLM are installed). Log training metrics via trackio (installed; wandb-API-compatible -- "import trackio as wandb; wandb.init(project='ptb', space_id=os.environ['TRACKIO_SPACE_ID'])").
+3. While the optimize loop runs, follow the finetuning skill for method and diagnostic judgment. Take the LOCAL training path (TRL/PEFT and vLLM are installed).
+
+For training observability: trackio is installed and ships logs to a HuggingFace Space. Trackio is wandb-API-compatible but does NOT register itself as the `wandb` module, so `report_to="wandb"` in TrainingArguments does nothing. Use the bundled callback instead:
+
+    from scripts.trl_trackio_callback import TrackioCallback
+    trainer = SFTTrainer(..., args=SFTConfig(..., report_to="none"))
+    trainer.add_callback(TrackioCallback(project="ptb", run_name="<exp_id>"))
+    trainer.train()
+
+Leave `report_to="none"` in the config. The callback handles trackio.init(), log forwarding on every Trainer log event, and finish() on train_end. TRACKIO_SPACE_ID and HF_TOKEN env vars are already set; the callback validates them and fails loudly if either is missing.
 
 final_model/ at the end must be evo's best gate-passing checkpoint. Do NOT skip the evo:discover and evo:optimize steps -- that is the whole point of this agent variant. Obey every PostTrainBench rule below.
 

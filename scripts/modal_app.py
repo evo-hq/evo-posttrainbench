@@ -215,6 +215,24 @@ def dry_run():
     subprocess.run(["claude", "--version"], check=True)
     subprocess.run(["evo", "--version"], check=True)
 
+    print("=== Trackio end-to-end ===", flush=True)
+    # Catch the silent-empty-space failure mode before paying for a 10h train.
+    # If init/log/finish round-trips without raising, the HF Space exists and
+    # the HF_TOKEN has write scope on it. Run name is unique so it shows up as
+    # a distinct dry_run trace and doesn't pollute real training curves.
+    import time as _time
+    space_id = os.environ.get("TRACKIO_SPACE_ID", "alok97/posttrain-runs")
+    if not os.environ.get("HF_TOKEN"):
+        raise SystemExit("ERROR: HF_TOKEN missing -- trackio needs write-scope token for the HF Space.")
+    import trackio
+    run_name = f"dry_run_{int(_time.time())}"
+    trackio.init(project="ptb-dry-run", name=run_name, space_id=space_id)
+    trackio.log({"smoke_metric": 1.0, "another": 0.5}, step=0)
+    trackio.log({"smoke_metric": 0.9, "another": 0.6}, step=1)
+    trackio.finish()
+    print(f"  trackio: round-tripped 2 log entries to https://huggingface.co/spaces/{space_id}", flush=True)
+    print(f"  trackio: dry-run trace name = {run_name} (visible in the space's run list)", flush=True)
+
     print("\nALL OK -- safe to invoke train()", flush=True)
 
 
