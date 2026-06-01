@@ -16,7 +16,11 @@ if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L 2>/dev/null | grep
 fi
 
 # 1. persistent workspace
-read -rp "Persistent workspace dir [/home/ptb]: " WORK <"$TTY"; WORK="${WORK:-/home/ptb}"
+# Default to /home/<user>/ptb so it's writable without sudo when the host's
+# default user isn't root. Matches run.sh's default so a later
+# `WORK=... run.sh run ...` invocation resolves to the same dir without an override.
+DEFAULT_WORK="/home/$(whoami)/ptb"
+read -rp "Persistent workspace dir [$DEFAULT_WORK]: " WORK <"$TTY"; WORK="${WORK:-$DEFAULT_WORK}"
 mkdir -p "$WORK"; export WORK
 
 # 2. repo (use current checkout if we're in it, else clone into the workspace)

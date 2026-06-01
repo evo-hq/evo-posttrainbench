@@ -21,24 +21,52 @@ Rules (unchanged): 10h on 1 H100; no test data in training; don't modify `evalua
 
 ## How to replicate
 
-You need a single rented **H100** (JarvisLabs/RunPod). Keep everything under `/home` — it persists across pause; `/root` and system installs get wiped.
+Single rented **H100 80GB** on a bare-Ubuntu host with persistent `/home` (JarvisLabs/RunPod/vast/etc.). Pre-baked PyTorch/Axolotl images conflict — `containers/requirements-direct.txt` is installed from scratch against a specific torch + vLLM 0.11 + flash-attn 2.8.3 combination.
 
-1. **Provision + SSH** into the H100. On JarvisLabs, also open port **8080** in the instance's exposed ports (for the dashboard).
-2. **Set it up** — one interactive script (prompts for workspace + auth + secrets, installs everything, sanity-checks, and **exits early if there's no GPU**):
-   ```
-   git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench && bash scripts/setup.sh
-   ```
-   Claude auth uses your **Max-subscription OAuth token** — run `claude setup-token` on your laptop, paste the token when the script asks. `google/gemma-3-4b-pt` is gated, so have an `HF_TOKEN` ready.
-3. **Run** — inside `tmux` so it survives disconnect:
-   ```
-   WORK=/home/ptb bash scripts/run.sh run aime2025 Qwen/Qwen3-4B-Base 1     # 1h smoke first
-   WORK=/home/ptb bash scripts/run.sh run aime2025 Qwen/Qwen3-4B-Base 10
-   WORK=/home/ptb bash scripts/run.sh run aime2025 google/gemma-3-4b-pt 10
-   ```
-   Results land in `$WORK/runs/<...>/`: `prompt.txt`, `solve_parsed.txt` (agent transcript), `final_model/`, `metrics.json`, `final_eval.txt`.
-4. **Monitor** — `run` exports `EVO_DASHBOARD_HOST=0.0.0.0` so evo's auto-started dashboard is reachable on the instance's port 8080 directly; plus `nvtop` and W&B (see [Monitor](#monitor)).
+1. **Provision + SSH.** Pick a bare-Ubuntu template, 1× H100 80GB, ~200 GB SSD. Expose port **8080** for the dashboard. Register an SSH key with the provider before launching; prefer ed25519 (modern OpenSSH disables `ssh-rsa` by default).
 
-After a pause, re-run step 2 (`setup.sh`, or just `… bootstrap`) — `/home` survives but the installs don't. Prefer manual? `setup.sh` only chains `run.sh bootstrap` → write `$WORK/.env` (+ `$WORK/oauth_token`) → `run`.
+2. **Prepare credentials** on your laptop:
+   - `HF_TOKEN` — huggingface.co/settings/tokens, read scope. `google/gemma-3-4b-pt` is gated.
+   - `CLAUDE_CODE_OAUTH_TOKEN` — `claude setup-token`. One token works across machines (Max-subscription scope).
+   - `TRACKIO_SPACE_ID` (optional) — a HF Space you own for training curves. Defaults to `alok97/posttrain-runs`.
+
+3. **Set up the box.** Two paths to the same state (deps installed, evo CLI editable-installed, plugin registered into Claude Code, secrets in `$WORK/.env`).
+
+   Interactive — script prompts for workspace + each secret:
+   ```
+   ssh <host>
+   git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench
+   bash scripts/setup.sh
+   ```
+
+   Scripted — ship a prepared `.env`, skip prompts:
+   ```
+   scp .env <host>:/home/<user>/ptb/.env
+   ssh <host> '
+     git clone https://github.com/evo-hq/evo-posttrainbench.git && cd evo-posttrainbench
+     bash scripts/run.sh bootstrap
+   '
+   ```
+
+   Verify:
+   ```
+   ssh <host> 'evo --version'    # expected: evo-hq-cli 0.5.0-alpha.5
+   ```
+
+   Bootstrap takes ~30 min on a fresh box; vLLM + flash-attn builds dominate. After a host pause, re-run `bash scripts/run.sh bootstrap` — `/home` survives, system installs don't.
+
+4. **Run** — inside `tmux` so it survives disconnect. Workspace is `/home/<user>/ptb`; on most VM templates the default user is `ubuntu`.
+   ```
+   tmux new -s ptb
+   bash scripts/run.sh run aime2025 Qwen/Qwen3-4B-Base 1     # 1h smoke first
+   bash scripts/run.sh run aime2025 Qwen/Qwen3-4B-Base 10
+   bash scripts/run.sh run aime2025 google/gemma-3-4b-pt 10
+   ```
+   Results land in `$WORK/runs/<run>/`: `prompt.txt`, `solve_parsed.txt` (agent transcript), `final_model/`, `metrics.json`, `final_eval.txt`.
+
+5. **Monitor** — `run.sh run` exports `EVO_DASHBOARD_HOST=0.0.0.0` so evo's auto-started dashboard binds outward on port 8080. See [Monitor](#monitor) for trackio + tunnel fallbacks.
+
+6. **Pause or destroy when done.** Provider-specific. Pause typically keeps `/home` at near-zero hourly cost; resume + `bash scripts/run.sh bootstrap` puts you back where you were. Destroy wipes everything.
 
 ## Replicate (Modal — serverless H100)
 
