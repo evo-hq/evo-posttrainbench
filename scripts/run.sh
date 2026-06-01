@@ -56,7 +56,13 @@ bootstrap() {
   # evo from our branch + register the plugin (incl. the finetuning skill) into Claude Code
   [ -d "$WORK/evo" ] || git clone -b "$EVO_BRANCH" https://github.com/evo-hq/evo.git "$WORK/evo"
   uv tool install --editable "$WORK/evo/plugins/evo"
-  evo install claude-code
+  # Install the plugin from the LOCAL evo clone (feat/model-update tip)
+  # rather than the public marketplace -- the marketplace points at the
+  # stable release tag (currently 0.4.4) which lags behind feat/model-update.
+  # --from-path uses the same source the CLI was built from, so skills + CLI
+  # versions stay in sync. Critical for picking up the rewritten finetuning
+  # skill, the new prompt, etc.
+  evo install claude-code --from-path "$WORK/evo"
 
   echo "Bootstrap done."
   echo "  1) generate an OAuth token locally:  claude setup-token   -> save it to $WORK/oauth_token"
