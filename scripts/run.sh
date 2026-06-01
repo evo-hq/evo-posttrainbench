@@ -25,33 +25,40 @@ require_gpu() {
 
 bootstrap() {
   require_gpu
+  # System-package and global-Python installs need root; per-user uv tool
+  # install + Claude Code plugin install do not. SUDO is empty when already
+  # root (e.g. JL container template), `sudo` otherwise (e.g. JL vm template
+  # whose default user is `ubuntu`). Passwordless sudo is assumed on
+  # non-root hosts -- without it, apt-get/npm/uv-system installs hang.
+  local SUDO=""
+  [ "$(id -u)" -ne 0 ] && SUDO="sudo"
   mkdir -p "$WORK" "$HF_HOME" "$CLAUDE_CONFIG_DIR" "$WORK/runs"
   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
-  command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs; }
-  npm install -g @anthropic-ai/claude-code@2.1.76          # match the version they ran
+  command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - && $SUDO apt-get install -y nodejs; }
+  $SUDO npm install -g @anthropic-ai/claude-code@2.1.76          # match the version they ran
 
   # PostTrainBench starting environment (pinned) + vLLM + flash-attn
   # Pin to cu128: --torch-backend=auto fails during builds with no GPU attached
   # (e.g. Modal image builds); cu128 wheels are compatible with our cuda:12.9.1 base.
-  uv pip install --system --no-cache vllm==0.11.0 --torch-backend=cu128
-  uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
+  $SUDO env "PATH=$PATH" uv pip install --system --no-cache vllm==0.11.0 --torch-backend=cu128
+  $SUDO env "PATH=$PATH" uv pip install --system --no-cache -r "$REPO/containers/requirements-direct.txt"
   # trackio: wandb-API-compatible OSS tracker; logs to a HF Space.
   # Pin <0.10 -- 0.10+ requires gradio 6 + huggingface-hub>=1.0, conflicts with
   # PostTrainBench's pinned transformers 4.57.3 (needs hf-hub<1.0).
-  uv pip install --system --no-cache 'trackio<0.10'
+  $SUDO env "PATH=$PATH" uv pip install --system --no-cache 'trackio<0.10'
   # wheel needed for flash-attn's --no-build-isolation (it doesn't declare wheel as a build dep)
-  uv pip install --system --no-cache wheel setuptools
-  uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation
+  $SUDO env "PATH=$PATH" uv pip install --system --no-cache wheel setuptools
+  $SUDO env "PATH=$PATH" uv pip install --system --no-cache flash-attn==2.8.3 --no-build-isolation
 
   # eval deps: inspect_evals registers the task (e.g. inspect_evals/aime2025); the
   # vLLM-stdout inspect_ai fork is what their evaluate.py uses. Pinned to match upstream.
   local INS; INS=$(mktemp -d)
   git clone https://github.com/UKGovernmentBEIS/inspect_evals.git "$INS/inspect_evals" \
     && ( cd "$INS/inspect_evals" && git checkout 06001a83e6d7c709c2ede0570dce7f1031a0bad8 \
-         && uv pip install --system --no-cache . )
+         && $SUDO env "PATH=$PATH" uv pip install --system --no-cache . )
   git clone https://github.com/rank-and-file/inspect_ai_vllm_stdout.git "$INS/inspect_ai_vllm_stdout" \
-    && ( cd "$INS/inspect_ai_vllm_stdout" && uv pip install --system --no-cache . )
+    && ( cd "$INS/inspect_ai_vllm_stdout" && $SUDO env "PATH=$PATH" uv pip install --system --no-cache . )
 
   # evo from our branch + register the plugin (incl. the finetuning skill) into Claude Code
   # On re-bootstrap (after a JL pause, etc.) $WORK/evo persists -- fetch + hard-reset to
