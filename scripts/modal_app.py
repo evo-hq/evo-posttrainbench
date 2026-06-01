@@ -236,10 +236,11 @@ def dry_run():
 
     print("=== Trackio end-to-end ===", flush=True)
     # Catch the silent-empty-space failure mode before paying for a 10h train.
-    # If init/log/finish round-trips without raising, the HF Space exists and
-    # the HF_TOKEN has write scope on it. Run name is unique so it shows up as
-    # a distinct dry_run trace and doesn't pollute real training curves.
+    # If init/log succeeds without raising, the HF Space exists and HF_TOKEN
+    # has write scope on it. Run name is unique so it shows up as a distinct
+    # dry_run trace and doesn't pollute real training curves.
     import time as _time
+    import threading as _threading
     space_id = os.environ.get("TRACKIO_SPACE_ID", "alok97/posttrain-runs")
     if not os.environ.get("HF_TOKEN"):
         raise SystemExit("ERROR: HF_TOKEN missing -- trackio needs write-scope token for the HF Space.")
@@ -248,9 +249,22 @@ def dry_run():
     trackio.init(project="ptb-dry-run", name=run_name, space_id=space_id)
     trackio.log({"smoke_metric": 1.0, "another": 0.5}, step=0)
     trackio.log({"smoke_metric": 0.9, "another": 0.6}, step=1)
-    trackio.finish()
-    print(f"  trackio: round-tripped 2 log entries to https://huggingface.co/spaces/{space_id}", flush=True)
-    print(f"  trackio: dry-run trace name = {run_name} (visible in the space's run list)", flush=True)
+    # trackio.finish() blocks indefinitely in <0.10 when the CommitScheduler
+    # is between cycles -- cap at 30s. The scalars are already queued; the
+    # scheduler will flush on its normal interval if our wait times out.
+    _flush_done = _threading.Event()
+    def _finish():
+        try:
+            trackio.finish()
+        finally:
+            _flush_done.set()
+    _threading.Thread(target=_finish, daemon=True).start()
+    if _flush_done.wait(timeout=30):
+        print(f"  trackio: round-tripped 2 log entries (init+log+finish)", flush=True)
+    else:
+        print(f"  trackio: init+log OK; finish() flush still running in background", flush=True)
+    print(f"  trackio: dataset = {space_id}-dataset, run = {run_name}", flush=True)
+    print(f"  trackio: https://huggingface.co/spaces/{space_id}", flush=True)
 
     print("\nALL OK -- safe to invoke train()", flush=True)
 

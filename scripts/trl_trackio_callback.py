@@ -91,7 +91,21 @@ class TrackioCallback(TrainerCallback):
         self._trackio.log(logs, step=state.global_step)
 
     def on_train_end(self, args, state, control, **kwargs):
-        try:
-            self._trackio.finish()
-        except Exception:
-            pass
+        # trackio.finish() blocks waiting on its CommitScheduler to flush the
+        # final parquet to the HF Dataset. In trackio<0.10 the wait can hang
+        # indefinitely if the scheduler is between cycles or the upload thread
+        # has stalled, which would freeze the training container at the end
+        # of the run. Cap it at 60s -- on-cycle uploads still land; only the
+        # final flush is best-effort.
+        import threading
+        def _flush():
+            try:
+                self._trackio.finish()
+            except Exception:
+                pass
+        t = threading.Thread(target=_flush, daemon=True)
+        t.start()
+        t.join(timeout=60)
+        # If still alive after 60s, leave the daemon thread running and
+        # let the container exit normally; the scheduler's next cycle (or
+        # the container's atexit hook) will upload whatever's left.
