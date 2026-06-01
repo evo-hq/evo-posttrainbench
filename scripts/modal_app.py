@@ -43,7 +43,14 @@ image = (
     )
     # This fork: clone for containers/requirements-direct.txt + scripts/run.sh
     # + agents/claude_evo_max + src/eval/*.
-    .run_commands(f"git clone -b {PTB_BRANCH} https://github.com/evo-hq/evo-posttrainbench.git /opt/ptb")
+    # Clone the default branch (whatever it is) at image build -- only needed
+    # for containers/requirements-direct.txt to feed the next layer. The
+    # runtime command in _agent_cmd does `git fetch + reset --hard` to
+    # PTB_BRANCH on every container start, so branch selection is a runtime
+    # concern, not image-time. Keeping the image clone branch-agnostic
+    # preserves cache: changing PTB_BRANCH no longer busts flash-attn's
+    # build layer (which OOMs on rebuild, exit 137).
+    .run_commands("git clone https://github.com/evo-hq/evo-posttrainbench.git /opt/ptb")
     # PostTrainBench's pinned starting env + vLLM + flash-attn
     # `--torch-backend=auto` fails during a Modal image build because there's no
     # GPU at build time for uv to detect; pin to cu128 (matches our 12.9.1 base).
