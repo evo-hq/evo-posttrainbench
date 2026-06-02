@@ -232,9 +232,23 @@ dashboard() {
   ( cd "$LATEST" && EVO_DASHBOARD_HOST=0.0.0.0 EVO_DASHBOARD_PORT=8080 exec evo dashboard )
 }
 
+watch() {
+  # Live human-readable view of the latest run's stream-json transcript.
+  # Tails $RUN/solve_out.txt (the per-run transcript run.sh tees to). Argument
+  # overrides the path; pass '-' to read from stdin.
+  local LATEST="${1:-}"
+  if [ -z "$LATEST" ]; then
+    LATEST=$(ls -1dt "$WORK"/runs/*/solve_out.txt 2>/dev/null | head -1)
+    [ -n "$LATEST" ] || { echo "no solve_out.txt under $WORK/runs yet"; exit 1; }
+  fi
+  echo "watching: $LATEST   (Ctrl-C to stop; agent run continues)" >&2
+  exec python3 "$REPO/scripts/watch_run.py" "$LATEST"
+}
+
 case "$CMD" in
   bootstrap) bootstrap ;;
   run) shift; run "$@" ;;
   dashboard) dashboard ;;
-  *) echo "usage: $0 bootstrap | run [task=aime2025] [model=Qwen/Qwen3-4B-Base] [hours=10] | dashboard" ;;
+  watch) shift; watch "$@" ;;
+  *) echo "usage: $0 bootstrap | run [task=aime2025] [model=Qwen/Qwen3-4B-Base] [hours=10] | dashboard | watch [<log_path>]" ;;
 esac
