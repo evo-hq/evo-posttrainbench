@@ -182,9 +182,12 @@ when relevant; load on demand, not upfront):
                     ORPO/RFT/GRPO/PPO/RLOO); reward-shape decision tree,
                     smoke-run gate, failure diagnostics
 
-Start with evo:discover. When discover is done, invoke evo:optimize with
-args "autonomous". Pull evo:finetuning when picking or diagnosing a
-training technique.
+Start with evo:discover. When discover is done, set `evo config set
+max-attempts 1` (training is hour-scale; retry-with-tweak burns compute
+on flawed hypotheses -- one shot per node, branch fresh on regression).
+Then invoke evo:optimize with args "autonomous subagents=1 budget=1"
+(one experiment per subagent, return to orchestrator for the next move).
+Pull evo:finetuning when picking or diagnosing a training technique.
 
 Available infra in env (use when relevant, ignore otherwise):
   - TRACKIO_SPACE_ID -- wandb-API-compatible OSS tracker. Wire into
