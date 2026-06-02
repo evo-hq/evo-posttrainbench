@@ -16,6 +16,12 @@ REPO="${REPO:-$(pwd)}"                 # this PostTrainBench-evo checkout
 EVO_BRANCH="${EVO_BRANCH:-feat/model-update}"
 export HF_HOME="${HF_HOME:-$WORK/hf}"
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$WORK/.claude}"
+# uv (and the per-user-installed evo CLI it brings in) lives in ~/.local/bin.
+# Interactive shells get this via .profile; non-interactive ssh invocations
+# and child processes spawned by the agent's claude session do not. Export
+# at top level so every subcommand (run, dashboard) and every shell the
+# agent spawns can find `evo`.
+export PATH="$HOME/.local/bin:$PATH"
 
 require_gpu() {
   if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L 2>/dev/null | grep -q 'GPU'; then
