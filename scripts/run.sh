@@ -186,6 +186,15 @@ Start with evo:discover. When discover is done, invoke evo:optimize with
 args "autonomous". Pull evo:finetuning when picking or diagnosing a
 training technique.
 
+Available infra in env (use when relevant, ignore otherwise):
+  - TRACKIO_SPACE_ID -- wandb-API-compatible OSS tracker. Wire into
+    training scripts (TRL: report_to="trackio"; custom loop: see
+    evo:finetuning references/observability.md) for live loss curves
+    in a public HF Space. Reduces the observability-blind window during
+    long training runs.
+  - HF_TOKEN -- HuggingFace auth. Use for gated datasets/models
+    (Gemma, Llama-Instruct, etc.) and private Hub uploads if useful.
+
 EOF
   sed -i.bak -e "s|__MODEL__|$MODEL|g" -e "s|__BENCH__|$BENCH_NAME|g" "$RUN/prompt.txt"
   rm -f "$RUN/prompt.txt.bak"
