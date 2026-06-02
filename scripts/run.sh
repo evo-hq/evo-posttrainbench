@@ -12,7 +12,11 @@ set -euo pipefail
 
 CMD="${1:-help}"
 WORK="${WORK:-/home/$(whoami)/ptb}"
-REPO="${REPO:-$(pwd)}"                 # this PostTrainBench-evo checkout
+# Derive REPO from this script's own location instead of $(pwd) -- otherwise
+# `ssh host 'bash /abs/path/run.sh ...'` resolves REPO to the SSH login CWD
+# (typically $HOME), which breaks every $REPO-relative path the script uses.
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${REPO:-$(dirname "$_SCRIPT_DIR")}"
 EVO_BRANCH="${EVO_BRANCH:-feat/model-update}"
 export HF_HOME="${HF_HOME:-$WORK/hf}"
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$WORK/.claude}"
@@ -234,15 +238,19 @@ dashboard() {
 
 watch() {
   # Live human-readable view of the latest run's stream-json transcript.
-  # Tails $RUN/solve_out.txt (the per-run transcript run.sh tees to). Argument
-  # overrides the path; pass '-' to read from stdin.
-  local LATEST="${1:-}"
+  # No-arg: auto-find the latest $WORK/runs/*/solve_out.txt.
+  # First arg as existing path: tail that path instead.
+  # All remaining args (e.g. -v, -t, --no-color) are forwarded to watch_run.py.
+  local LATEST=""
+  if [ "$#" -gt 0 ] && [ -e "$1" ]; then
+    LATEST="$1"; shift
+  fi
   if [ -z "$LATEST" ]; then
     LATEST=$(ls -1dt "$WORK"/runs/*/solve_out.txt 2>/dev/null | head -1)
     [ -n "$LATEST" ] || { echo "no solve_out.txt under $WORK/runs yet"; exit 1; }
   fi
   echo "watching: $LATEST   (Ctrl-C to stop; agent run continues)" >&2
-  exec python3 "$REPO/scripts/watch_run.py" "$LATEST"
+  exec python3 "$REPO/scripts/watch_run.py" "$LATEST" "$@"
 }
 
 case "$CMD" in
