@@ -162,45 +162,29 @@ EOF
   BASE=$(python3 src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
   BENCH_NAME=$(tr -d '\n' < "src/eval/tasks/$TASK/benchmark.txt")
   cat > "$RUN/prompt.txt" <<'EOF'
-Goal: take a baseline measurement of __MODEL__ on __BENCH__, then improve that score via post-training. Concretely, you will use post-training techniques (SFT, DPO/KTO/ORPO, RFT, GRPO/PPO/RLOO -- pick by reward shape) applied to __MODEL__'s weights to produce a final_model/ that beats the base model on __BENCH__.
+We want to improve __MODEL__'s performance on __BENCH__ via evo's
+optimization process.
 
-STEP 0 -- internalize every evo skill before doing anything else.
+This is a fully autonomous research run -- no user is present, operate
+end-to-end on your own to the time budget.
 
-The evo plugin exposes the following skills. Invoke each ONE BY ONE via the Skill tool with no args, read the full body (not just the description), and let the content inform every subsequent decision. Do this BEFORE evo init, before any bash beyond reading files, before any planning, before writing any code.
+The evo plugin is available with these skills (invoke via the Skill tool
+when relevant; load on demand, not upfront):
 
-- evo:discover    -- baseline + gates setup; how to construct an experiment
-- evo:optimize    -- the improvement loop after baseline
-- evo:finetuning  -- which post-training technique fits which reward shape, what never counts as progress, and diagnostics for when an approach is exhausted. LOAD THIS BEFORE WRITING ANY TRAINING CODE -- the reward-shape decision tree decides whether you should be doing SFT or RL on this benchmark, and the answer is not always SFT.
-- evo:ideator     -- proposing what to try next
-- evo:subagent    -- spawning parallel experiments
-- evo:verifier    -- catching false-progress (held-out leakage, format mismatch, etc.)
-- evo:report      -- summarizing runs
-- evo:infra-setup -- backend choices
+  - evo:discover    initialize evo for the project: explore, propose
+                    optimization dimensions, construct the benchmark,
+                    run the first experiment
+  - evo:optimize    run the optimization loop. Spawns parallel subagents
+                    that each carry one experiment to completion (the
+                    subagents auto-load the evo:subagent protocol).
+                    Pass args "autonomous" for continuous mode.
+  - evo:finetuning  pick or diagnose a training move (SFT/LoRA/DPO/KTO/
+                    ORPO/RFT/GRPO/PPO/RLOO); reward-shape decision tree,
+                    smoke-run gate, failure diagnostics
 
-Only after you have invoked and read all eight skills do you proceed below.
-
-STEP 1 -- invoke evo:discover, seeded with: "improve __MODEL__ on __BENCH__ via post-training; the benchmark is ./evaluate.py (already provided -- do not modify per rule 4); curate training data from public sources only, NEVER __BENCH__ test data (per rule 3); only fine-tune __MODEL__ (per rule 7); final_model must be the best gate-passing checkpoint." Discover constructs the baseline + gates and commits the first experiment (the baseline-untrained score) before any post-training begins. Do not skip this commit -- it is your comparison point for every subsequent experiment.
-
-STEP 2 -- invoke evo:optimize. The optimize loop drives all post-training experiments after baseline. Per-experiment decisions on technique + hyperparameters come from evo:finetuning (which you just read), not from your own priors.
-
-WORKFLOW: train first, benchmark second. The two are separate steps.
-
-  1. You make changes -- data curation, hyperparameter selection, technique choice, training code edits.
-  2. You run training/finetuning to produce a checkpoint at <worktree>/final_model/ (or the path evo:finetuning's references/glue.md specifies for your technique).
-  3. ONLY THEN do you run the benchmark to score the trained model.
-
-The evo benchmark command must be eval-only -- it loads the checkpoint at final_model/ (or the relevant artifact path) and scores it. Do NOT wrap train + eval into a single benchmark command. If you do, every gate re-validation and every re-score retrains from scratch, and you burn the 10h budget on duplicated training instead of new experiments. The benchmark you register in evo init should call evaluate.py (or a thin wrapper that just evals), NOT train.py.
-
-Training observability: trackio is installed and ships logs to a HuggingFace Space. Trackio is wandb-API-compatible but does NOT register itself as the `wandb` module, so `report_to="wandb"` in TrainingArguments does nothing. Use the bundled callback instead:
-
-    from scripts.trl_trackio_callback import TrackioCallback
-    trainer = SFTTrainer(..., args=SFTConfig(..., report_to="none"))
-    trainer.add_callback(TrackioCallback(project="ptb", run_name="<exp_id>"))
-    trainer.train()
-
-Leave `report_to="none"` in the config. The callback handles trackio.init(), log forwarding on every Trainer log event, and finish() on train_end. TRACKIO_SPACE_ID and HF_TOKEN env vars are already set; the callback validates them and fails loudly if either is missing.
-
-final_model/ at the end must be evo's best gate-passing checkpoint. Obey every PostTrainBench rule below.
+Start with evo:discover. When discover is done, invoke evo:optimize with
+args "autonomous". Pull evo:finetuning when picking or diagnosing a
+training technique.
 
 EOF
   sed -i.bak -e "s|__MODEL__|$MODEL|g" -e "s|__BENCH__|$BENCH_NAME|g" "$RUN/prompt.txt"
