@@ -39,6 +39,11 @@ bootstrap() {
   local SUDO=""
   [ "$(id -u)" -ne 0 ] && SUDO="sudo"
   mkdir -p "$WORK" "$HF_HOME" "$CLAUDE_CONFIG_DIR" "$WORK/runs"
+  # python-is-python3: Ubuntu 22.04 ships only `python3`; many scripts (this
+  # one, evaluate.py invocations, the agent's training code) call bare `python`.
+  # The symlink package is one line and removes a class of "command not found"
+  # surprises mid-run.
+  $SUDO apt-get install -y -q python-is-python3
   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
   command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - && $SUDO apt-get install -y nodejs; }
@@ -150,7 +155,7 @@ EOF
   # command substitution. The Modal container has bash 5 and doesn't care, but
   # we want clean local lints too.
   local BASE BENCH_NAME PROMPT
-  BASE=$(python src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
+  BASE=$(python3 src/eval/general/get_prompt.py --model-to-train "$MODEL" --benchmark-id "$TASK" --num-hours "$HOURS" --num-gpus 1 --agent "$AGENT")
   BENCH_NAME=$(tr -d '\n' < "src/eval/tasks/$TASK/benchmark.txt")
   cat > "$RUN/prompt.txt" <<'EOF'
 Goal: take a baseline measurement of __MODEL__ on __BENCH__, then improve that score via post-training. Concretely, you will use post-training techniques (SFT, DPO/KTO/ORPO, RFT, GRPO/PPO/RLOO -- pick by reward shape) applied to __MODEL__'s weights to produce a final_model/ that beats the base model on __BENCH__.
@@ -204,11 +209,11 @@ EOF
   # tee so the agent's stream-json shows in `modal app logs` AND persists to disk
   ( cd "$JOB" && timeout --signal=TERM --kill-after=60s "$((HOURS * 60 + 5))m" \
       bash "$REPO/agents/$AGENT/solve.sh" ) 2>&1 | tee "$RUN/solve_out.txt" || true
-  python "agents/$AGENT/human_readable_trace.py" "$RUN/solve_out.txt" -o "$RUN/solve_parsed.txt" || true
+  python3 "agents/$AGENT/human_readable_trace.py" "$RUN/solve_out.txt" -o "$RUN/solve_parsed.txt" || true
 
   # evaluate final_model (single pass; their harness adds judge + max-token retries)
   if [ -d "$JOB/final_model" ]; then
-    ( cd "src/eval/tasks/$TASK" && python evaluate.py \
+    ( cd "src/eval/tasks/$TASK" && python3 evaluate.py \
         --model-path "$JOB/final_model" --templates-dir ../../templates \
         --limit -1 --json-output-file "$RUN/metrics.json" ) | tee "$RUN/final_eval.txt"
   else
