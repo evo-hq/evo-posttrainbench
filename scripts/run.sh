@@ -184,9 +184,13 @@ when relevant; load on demand, not upfront):
 
 Start with evo:discover. When discover is done, set `evo config set
 max-attempts 1` (training is hour-scale; retry-with-tweak burns compute
-on flawed hypotheses -- one shot per node, branch fresh on regression).
+on flawed hypotheses -- one shot per node, branch fresh on regression)
+AND set `evo config set default-orchestrator workflow` (drive the loop
+via the dynamic workflow, so the concurrent read-only analyst runs
+alongside it -- it observes GPU/logs/stuck experiments and never trains).
 Then invoke evo:optimize with args "autonomous subagents=1 budget=1"
-(one experiment per subagent, return to orchestrator for the next move).
+(one experiment lane at a time on this single H100; the analyst is
+concurrent and does not train).
 Pull evo:finetuning when picking or diagnosing a training technique.
 
 Available infra in env (use when relevant, ignore otherwise):
