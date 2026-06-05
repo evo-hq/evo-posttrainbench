@@ -17,7 +17,7 @@ WORK="${WORK:-/home/$(whoami)/ptb}"
 # (typically $HOME), which breaks every $REPO-relative path the script uses.
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="${REPO:-$(dirname "$_SCRIPT_DIR")}"
-EVO_BRANCH="${EVO_BRANCH:-feat/model-update}"
+EVO_BRANCH="${EVO_BRANCH:-release/0.5}"
 export HF_HOME="${HF_HOME:-$WORK/hf}"
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$WORK/.claude}"
 # uv (and the per-user-installed evo CLI it brings in) lives in ~/.local/bin.
@@ -51,7 +51,7 @@ bootstrap() {
   command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
   command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - && $SUDO apt-get install -y nodejs; }
-  $SUDO npm install -g @anthropic-ai/claude-code@2.1.76          # match the version they ran
+  $SUDO npm install -g @anthropic-ai/claude-code@latest          # latest claude-code
 
   # PostTrainBench starting environment (pinned) + vLLM + flash-attn
   # Pin to cu128: --torch-backend=auto fails during builds with no GPU attached
