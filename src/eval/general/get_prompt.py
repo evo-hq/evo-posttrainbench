@@ -58,6 +58,26 @@ def main():
 
     result = result.replace('{datetime}', datetime)
 
+    if args.benchmark_id == "lawbench":
+        # Simple, open objective -- supersedes the post-train template above.
+        result = (
+            f"Your objective is to achieve the highest possible top-1 accuracy on {benchmark_name}: "
+            f"for each of 913 Chinese criminal cases (in test.csv: id,text), predict the single correct "
+            f"charge (罪名) from the 191 labels in classes.json.\n\n"
+            f"You are free to carry out ANY changes to get the best score, and to iterate -- prompt/"
+            f"scaffold design, few-shot exemplars, retrieval over the training set, a non-LLM classifier, "
+            f"fine-tuning `{args.model_to_train}` (SFT/LoRA/RL), or any combination. Training a model is "
+            f"optional.\n\n"
+            f"Data (working dir): train.csv (5,332 rows id,text,label -- your only training/dev data); "
+            f"test.csv (913 rows id,text -- predict these); classes.json (the 191 valid labels).\n\n"
+            f"Scoring: produce submission.csv (columns id,label, each label one of the 191 classes), then "
+            f"run `python evaluate.py --submission submission.csv --json-output-file <out>` (top-1 exact-"
+            f"match accuracy; do not modify evaluate.py). Prior SOTA is 0.450.\n\n"
+            f"Rules: fit/train ONLY on train.csv; never use test.csv labels or test_gold.csv; if you fine-"
+            f"tune, only fine-tune `{args.model_to_train}`.\n\n"
+            f"{gpu_info}\nYou have {args.num_hours} hours. No user interaction -- operate autonomously.\n"
+        )
+
     if args.agent == 'claude':
         result += """
 You are running in a non-interactive mode. So make sure every process you are running finishes before you write your last message.
